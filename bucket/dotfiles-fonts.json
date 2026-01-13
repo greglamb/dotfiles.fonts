@@ -4,10 +4,10 @@
   "homepage": "https://github.com/greglamb/dotfiles.fonts",
   "license": "Apache-2.0",
   "url": [
-    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Regular.ttf",
-    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold.ttf",
-    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Italic.ttf",
-    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold%20Italic.ttf"
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Regular.ttf#/MesloLGS NF Regular.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold.ttf#/MesloLGS NF Bold.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Italic.ttf#/MesloLGS NF Italic.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold%20Italic.ttf#/MesloLGS NF Bold Italic.ttf"
   ],
   "hash": [
     "d97946186e97f8d7c0139e8983abf40a1d2d086924f2c5dbf1c29bd8f2c6e57d",
