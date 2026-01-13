@@ -7,9 +7,6 @@ cask "dotfiles-fonts" do
   desc "Nerd Font patched Meslo for terminals and editors"
   homepage "https://github.com/greglamb/dotfiles.fonts"
 
-  font "MesloLGS NF Regular.ttf"
-
-  # Additional font files
   resource "bold" do
     url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold.ttf"
     sha256 "b6c0199cf7c7483c8343ea020658925e6de0aeb318b89908152fcb4d19226003"
@@ -26,9 +23,16 @@ cask "dotfiles-fonts" do
   end
 
   postflight do
-    resource("bold").stage { FileUtils.mv("MesloLGS NF Bold.ttf", "#{Dir.home}/Library/Fonts/") }
-    resource("italic").stage { FileUtils.mv("MesloLGS NF Italic.ttf", "#{Dir.home}/Library/Fonts/") }
-    resource("bold-italic").stage { FileUtils.mv("MesloLGS NF Bold Italic.ttf", "#{Dir.home}/Library/Fonts/") }
+    font_dir = "#{Dir.home}/Library/Fonts"
+    FileUtils.mkdir_p(font_dir)
+
+    # Install main font (Regular) - use glob to handle URL-encoded filename
+    Dir.glob("*.ttf").each { |f| FileUtils.cp(f, "#{font_dir}/MesloLGS NF Regular.ttf") }
+
+    # Install additional fonts
+    resource("bold").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Bold.ttf") } }
+    resource("italic").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Italic.ttf") } }
+    resource("bold-italic").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Bold Italic.ttf") } }
   end
 
   uninstall delete: [
