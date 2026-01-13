@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "description": "MesloLGS NF font family - Nerd Font patched Meslo for terminals and editors",
+  "homepage": "https://github.com/greglamb/dotfiles.fonts",
+  "license": "Apache-2.0",
+  "url": [
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Regular.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Italic.ttf",
+    "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold%20Italic.ttf"
+  ],
+  "hash": [
+    "d97946186e97f8d7c0139e8983abf40a1d2d086924f2c5dbf1c29bd8f2c6e57d",
+    "b6c0199cf7c7483c8343ea020658925e6de0aeb318b89908152fcb4d19226003",
+    "6f357bcbe2597704e157a915625928bca38364a89c22a4ac36e7a116dcd392ef",
+    "56b4131adecec052c4b324efb818dd326d586dbc316fc68f98f1cae2eb8d1220"
+  ],
+  "installer": {
+    "script": [
+      "$fontDir = \"$env:LOCALAPPDATA\\Microsoft\\Windows\\Fonts\"",
+      "$regPath = \"HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts\"",
+      "New-Item -ItemType Directory -Force -Path $fontDir | Out-Null",
+      "Get-ChildItem \"$dir\\*.ttf\" | ForEach-Object {",
+      "    $fontPath = \"$fontDir\\$($_.Name)\"",
+      "    Copy-Item $_.FullName -Destination $fontPath -Force",
+      "    New-ItemProperty -Path $regPath -Name \"$($_.BaseName) (TrueType)\" -Value $fontPath -PropertyType String -Force | Out-Null",
+      "}"
+    ]
+  },
+  "uninstaller": {
+    "script": [
+      "$fontDir = \"$env:LOCALAPPDATA\\Microsoft\\Windows\\Fonts\"",
+      "$regPath = \"HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts\"",
+      "Get-ChildItem \"$dir\\*.ttf\" | ForEach-Object {",
+      "    $fontPath = \"$fontDir\\$($_.Name)\"",
+      "    Remove-ItemProperty -Path $regPath -Name \"$($_.BaseName) (TrueType)\" -ErrorAction SilentlyContinue",
+      "    Remove-Item $fontPath -Force -ErrorAction SilentlyContinue",
+      "}"
+    ]
+  }
+}
