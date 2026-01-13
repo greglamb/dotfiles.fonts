@@ -2,7 +2,22 @@
 
 MesloLGS NF font family - a Nerd Font patched version of Meslo, optimized for terminal and editor use with powerline/icon support.
 
-## Installation (Windows - Scoop)
+## Installation
+
+### macOS (Homebrew)
+
+```bash
+# Add this tap (one-time)
+brew tap greglamb/fonts https://github.com/greglamb/dotfiles.fonts
+
+# Install fonts
+brew install --cask greglamb/fonts/dotfiles-fonts
+
+# Uninstall
+brew uninstall --cask dotfiles-fonts
+```
+
+### Windows (Scoop)
 
 ```powershell
 # Add this bucket (one-time)
