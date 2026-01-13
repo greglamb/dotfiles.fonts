@@ -1,5 +1,5 @@
 cask "dotfiles-fonts" do
-  version "1.0.0"
+  version "1.0.1"
   sha256 "d97946186e97f8d7c0139e8983abf40a1d2d086924f2c5dbf1c29bd8f2c6e57d"
 
   url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Regular.ttf"
