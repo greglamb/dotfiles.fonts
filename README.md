@@ -2,6 +2,8 @@
 
 MesloLGS NF font family - a Nerd Font patched version of Meslo, optimized for terminal and editor use with powerline/icon support.
 
+See [MesloLGSNF-web-fonts](https://github.com/greglamb/MesloLGSNF-web-fonts) for Chrome OS support
+
 ## Installation
 
 ### macOS (Homebrew)
