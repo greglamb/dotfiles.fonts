@@ -1,44 +1,15 @@
 cask "dotfiles-fonts" do
   version "1.0.1"
-  sha256 "d97946186e97f8d7c0139e8983abf40a1d2d086924f2c5dbf1c29bd8f2c6e57d"
+  sha256 "6438aa3ed4e8cadeba32e7f05bd444680a6353625b4647abab889a44cbb591a8"
 
-  url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Regular.ttf"
+  url "https://github.com/greglamb/dotfiles.fonts/archive/9f4c7873918c19abbd9c186106107cd7ea7aafff.tar.gz",
+      verified: "github.com/greglamb/dotfiles.fonts/"
   name "MesloLGS NF"
   desc "Nerd Font patched Meslo for terminals and editors"
   homepage "https://github.com/greglamb/dotfiles.fonts"
 
-  resource "bold" do
-    url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold.ttf"
-    sha256 "b6c0199cf7c7483c8343ea020658925e6de0aeb318b89908152fcb4d19226003"
-  end
-
-  resource "italic" do
-    url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Italic.ttf"
-    sha256 "6f357bcbe2597704e157a915625928bca38364a89c22a4ac36e7a116dcd392ef"
-  end
-
-  resource "bold-italic" do
-    url "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/MesloLGS%20NF%20Bold%20Italic.ttf"
-    sha256 "56b4131adecec052c4b324efb818dd326d586dbc316fc68f98f1cae2eb8d1220"
-  end
-
-  postflight do
-    font_dir = "#{Dir.home}/Library/Fonts"
-    FileUtils.mkdir_p(font_dir)
-
-    # Install main font (Regular) - use glob to handle URL-encoded filename
-    Dir.glob("*.ttf").each { |f| FileUtils.cp(f, "#{font_dir}/MesloLGS NF Regular.ttf") }
-
-    # Install additional fonts
-    resource("bold").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Bold.ttf") } }
-    resource("italic").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Italic.ttf") } }
-    resource("bold-italic").stage { Dir.glob("*.ttf").each { |f| FileUtils.mv(f, "#{font_dir}/MesloLGS NF Bold Italic.ttf") } }
-  end
-
-  uninstall delete: [
-    "~/Library/Fonts/MesloLGS NF Regular.ttf",
-    "~/Library/Fonts/MesloLGS NF Bold.ttf",
-    "~/Library/Fonts/MesloLGS NF Italic.ttf",
-    "~/Library/Fonts/MesloLGS NF Bold Italic.ttf",
-  ]
+  font "MesloLGS NF Regular.ttf"
+  font "MesloLGS NF Bold.ttf"
+  font "MesloLGS NF Italic.ttf"
+  font "MesloLGS NF Bold Italic.ttf"
 end
