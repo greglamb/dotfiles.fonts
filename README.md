@@ -19,6 +19,32 @@ brew install --cask greglamb/fonts/dotfiles-fonts
 brew uninstall --cask dotfiles-fonts
 ```
 
+If the fonts are already in `~/Library/Fonts`, add `--adopt` so Homebrew takes
+ownership of the existing files instead of refusing to overwrite them.
+
+#### Tap trust
+
+Homebrew requires third-party taps to be trusted. Installing by the
+fully-qualified name above trusts this cask automatically, so nothing extra is
+needed for the interactive flow.
+
+For an unattended bootstrap, trust it up front — **but tap first**:
+
+```bash
+brew tap greglamb/fonts https://github.com/greglamb/dotfiles.fonts
+brew trust --cask greglamb/fonts/dotfiles-fonts
+```
+
+Order matters. Because the tap is added with an explicit remote URL, Homebrew
+keys trust by that URL (`https://github.com/greglamb/dotfiles.fonts/dotfiles-fonts`).
+It can only resolve that key once the tap exists locally — run `brew trust`
+first and it records the short name instead, which the trust check will not
+match. `brew untrust --cask greglamb/fonts/dotfiles-fonts` removes either form.
+
+Trust lives entirely on the client, in `$XDG_CONFIG_HOME/homebrew/trust.json`
+or `~/.homebrew/trust.json`. There is nothing this repo can ship to pre-trust
+itself.
+
 ### Windows (Scoop)
 
 ```powershell
