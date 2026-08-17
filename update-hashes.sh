@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Update SHA256 hashes in Scoop manifest and Homebrew cask
-# Run this after changing font files and pushing the commit to GitHub.
+# Update SHA256 hashes in Scoop manifest and Homebrew cask.
 #
-# The Homebrew cask pins to a specific commit tarball on GitHub, so this
-# script fetches the latest origin/main commit SHA, downloads the tarball,
-# and rewrites the cask's URL + sha256 to match.
+# Workflow when releasing a new version:
+#   1. bump `version` in Casks/dotfiles-fonts.rb and bucket/dotfiles-fonts.json
+#   2. commit and push to main
+#   3. git tag v<version> && git push origin v<version>
+#   4. run this script, then commit the updated hashes
+#
+# The cask pins to the *tag* tarball, not a commit tarball. That matters: a tag
+# is immutable, so committing the hash this script writes does not invalidate
+# the thing it hashed. Pinning to origin/main could never converge, because the
+# cask lives in the repo it was hashing.
+#
+# The cask's url and font paths both interpolate #{version}, so only the sha256
+# needs rewriting here.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCOOP_MANIFEST="$SCRIPT_DIR/bucket/dotfiles-fonts.json"
@@ -53,27 +62,50 @@ jq --arg h0 "${HASHES[0]}" \
 echo ""
 echo "Updated $SCOOP_MANIFEST"
 
-# --- Homebrew cask: pin to latest origin/main commit tarball ---
+# --- Homebrew cask: pin to the release tag tarball ---
 echo ""
-echo "Fetching latest origin/main commit for Homebrew cask pin..."
 
-git -C "$SCRIPT_DIR" fetch origin main --quiet
-COMMIT_SHA=$(git -C "$SCRIPT_DIR" rev-parse origin/main)
-echo "origin/main = $COMMIT_SHA"
+VERSION=$(sed -nE 's|^  version "(.*)"$|\1|p' "$HOMEBREW_CASK")
+if [[ -z "$VERSION" ]]; then
+    echo "Error: could not read version from $HOMEBREW_CASK" >&2
+    exit 1
+fi
+TAG="v${VERSION}"
+# GitHub strips a leading "v" from the tag when naming the archive's root directory.
+PREFIX="$(basename "$REPO_SLUG")-${VERSION}"
+echo "Cask version $VERSION -> tag $TAG, archive prefix $PREFIX/"
 
-TARBALL_URL="https://github.com/${REPO_SLUG}/archive/${COMMIT_SHA}.tar.gz"
+git -C "$SCRIPT_DIR" fetch origin --tags --quiet
+if ! git -C "$SCRIPT_DIR" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo "Error: tag ${TAG} does not exist. Push the version bump, then:" >&2
+    echo "  git tag ${TAG} && git push origin ${TAG}" >&2
+    exit 1
+fi
+
+TARBALL_URL="https://github.com/${REPO_SLUG}/archive/refs/tags/${TAG}.tar.gz"
 TARBALL_TMP=$(mktemp)
 trap 'rm -f "$TARBALL_TMP"' EXIT
 
 echo "Downloading $TARBALL_URL"
 curl -fsSL -o "$TARBALL_TMP" "$TARBALL_URL"
+
+# Guard against the bug this packaging replaced: confirm every font the cask
+# declares is actually at the path the cask expects inside the archive.
+LISTING=$(tar tzf "$TARBALL_TMP")
+for font in "${FONTS[@]}"; do
+    if ! grep -Fqx "${PREFIX}/${font}" <<<"$LISTING"; then
+        echo "Error: ${PREFIX}/${font} is not in the tag tarball." >&2
+        echo "The cask's font paths would not resolve. Aborting." >&2
+        exit 1
+    fi
+done
+echo "Verified all ${#FONTS[@]} fonts are at ${PREFIX}/ inside the tarball"
+
 TARBALL_SHA=$(shasum -a 256 "$TARBALL_TMP" | cut -d' ' -f1)
 echo "Tarball sha256 = $TARBALL_SHA"
 
-# Rewrite the cask's sha256 and archive URL
 sed_i -E "s|^  sha256 \"[a-f0-9]+\"|  sha256 \"${TARBALL_SHA}\"|" "$HOMEBREW_CASK"
-sed_i -E "s|archive/[a-f0-9]{40}\.tar\.gz|archive/${COMMIT_SHA}.tar.gz|" "$HOMEBREW_CASK"
 
 echo "Updated $HOMEBREW_CASK"
 echo ""
-echo "NOTE: Commit and push the cask changes so users see the new pin."
+echo "NOTE: Commit and push the hash changes so users see the new pin."

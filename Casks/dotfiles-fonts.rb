@@ -1,15 +1,17 @@
 cask "dotfiles-fonts" do
-  version "1.0.1"
-  sha256 "6438aa3ed4e8cadeba32e7f05bd444680a6353625b4647abab889a44cbb591a8"
+  version "1.0.2"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/greglamb/dotfiles.fonts/archive/9f4c7873918c19abbd9c186106107cd7ea7aafff.tar.gz",
-      verified: "github.com/greglamb/dotfiles.fonts/"
+  url "https://github.com/greglamb/dotfiles.fonts/archive/refs/tags/v#{version}.tar.gz"
   name "MesloLGS NF"
   desc "Nerd Font patched Meslo for terminals and editors"
   homepage "https://github.com/greglamb/dotfiles.fonts"
 
-  font "MesloLGS NF Regular.ttf"
-  font "MesloLGS NF Bold.ttf"
-  font "MesloLGS NF Italic.ttf"
-  font "MesloLGS NF Bold Italic.ttf"
+  # GitHub source archives extract into a "<repo>-<ref>" wrapper directory, and
+  # `font` paths resolve against the staged root -- so the prefix is required.
+  # For the tag "v1.0.2" GitHub strips the leading "v", giving "dotfiles.fonts-1.0.2".
+  font "dotfiles.fonts-#{version}/MesloLGS NF Regular.ttf"
+  font "dotfiles.fonts-#{version}/MesloLGS NF Bold.ttf"
+  font "dotfiles.fonts-#{version}/MesloLGS NF Italic.ttf"
+  font "dotfiles.fonts-#{version}/MesloLGS NF Bold Italic.ttf"
 end
