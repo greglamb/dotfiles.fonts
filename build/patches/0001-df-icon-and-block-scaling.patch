@@ -1,0 +1,177 @@
+diff --git a/font-patcher b/font-patcher
+index 70ff7a6..0a3df96 100755
+--- a/font-patcher
++++ b/font-patcher
+@@ -13,6 +13,36 @@ projectName = "Nerd Fonts"
+ projectNameAbbreviation = "NF"
+ projectNameSingular = projectName[:-1]
+ 
++# --- dotfiles.fonts ("DF") deviations from stock Nerd Fonts -------------------
++#
++# Ported from romkatv/nerd-fonts, the fork that produced the original
++# "MesloLGS NF" that powerlevel10k recommends. Both deviations exist because
++# stock Nerd Fonts optimises for "icon fits inside the cell", while a prompt
++# theme optimises for "icons are legible and frames have no seams".
++#
++#   DF_ICON_SCALE       'pa' (preserve-aspect) icons are fitted against this
++#                       multiple of the cell width instead of one cell. Every
++#                       icon then lands in the same bounding box, overhanging
++#                       the cell by ~10% per side. Stock --mono clamps icons to
++#                       exactly one cell, which renders them noticeably smaller.
++#
++#   DF_BLOCK_*          U+2500..U+259F (box drawing + block elements) are scaled
++#                       slightly past the cell and nudged left/down so adjacent
++#                       cells overlap. Without this, the multi-line frames drawn
++#                       by powerlevel10k and tide show hairline gaps at many
++#                       font sizes.
++#
++# Both are gated behind --df so this patcher still builds stock output.
++DF_ICON_SCALE = 1.2
++DF_BLOCK_RANGE = range(0x2500, 0x25A0)
++DF_BLOCK_REFERENCE = 0x2588          # FULL BLOCK, drives the shared transform
++DF_BLOCK_SCALE_X = 1.06
++DF_BLOCK_SCALE_Y = 1.04
++DF_BLOCK_OFFSET_X = 0.03             # fraction of cell width, shifted left
++DF_BLOCK_OFFSET_Y = 0.02             # fraction of cell height, shifted down
++DF_BLOCK_PASSES = 3                  # iterate to converge away rounding error
++# -----------------------------------------------------------------------------
++
+ import argparse
+ from enum import Enum
+ import errno
+@@ -451,6 +481,9 @@ class font_patcher:
+                 self.copy_glyphs(SrcStart, symfont, patch['SymStart'], patch['SymEnd'], patch['Exact'], patch['ScaleRules'], patch['Name'], patch['Attributes'])
+                 glyphnum.update({patch['Name']: (patch.get('ish'), self.copy_glyphs_last['maximum'])})
+ 
++        if self.args.df:
++            self.scale_block_glyphs()
++
+         if symfont:
+             symfont.close()
+         if self.args.progressbars:
+@@ -1498,10 +1531,61 @@ class font_patcher:
+         if isinstance(self.xavgwidth[-1], int) and self.xavgwidth[-1] == 0:
+             self.xavgwidth[-1] = get_old_average_x_width(self.sourceFont)
+ 
++    def scale_block_glyphs(self):
++        """ DF: grow box drawing and block elements past the cell so they overlap
++
++        Ported from romkatv/nerd-fonts, but run after all patch sets have been
++        copied rather than before: the Bold source faces carry no box drawing of
++        their own, so for them these glyphs only exist once upstream's Box
++        Drawing set has been pasted in. Running last means all four faces end up
++        with the same geometry whichever way they got their glyphs.
++
++        U+2588 FULL BLOCK is scaled to
++        DF_BLOCK_SCALE_X/Y of the cell and shifted by DF_BLOCK_OFFSET_X/Y, and
++        the resulting transform is applied to the whole U+2500..U+259F range so
++        the box drawing pieces stay mutually aligned. The advance width is left
++        at exactly one cell, so the extra size shows up as overhang that closes
++        the seams between horizontally and vertically adjacent cells.
++        """
++        if DF_BLOCK_REFERENCE not in self.sourceFont:
++            logger.warning("DF: no U+%04X in source font, not scaling block glyphs", DF_BLOCK_REFERENCE)
++            return
++        for _ in range(DF_BLOCK_PASSES):
++            sym = self.sourceFont[DF_BLOCK_REFERENCE]
++            sym_dim = get_glyph_dimensions(sym)
++            if not sym_dim['width'] or not sym_dim['height']:
++                logger.warning("DF: U+%04X is empty, not scaling block glyphs", DF_BLOCK_REFERENCE)
++                return
++            scale = psMat.scale(
++                DF_BLOCK_SCALE_X * self.font_dim['width'] / sym_dim['width'],
++                DF_BLOCK_SCALE_Y * self.font_dim['height'] / sym_dim['height'])
++            sym.transform(scale)
++            sym_dim = get_glyph_dimensions(sym)
++            translate = psMat.translate(
++                self.font_dim['xmin'] - sym_dim['xmin'] - DF_BLOCK_OFFSET_X * self.font_dim['width'],
++                self.font_dim['ymin'] - sym_dim['ymin'] - DF_BLOCK_OFFSET_Y * self.font_dim['height'])
++            sym.transform(translate)
++            mat = psMat.compose(scale, translate)
++
++            for codepoint in DF_BLOCK_RANGE:
++                try:
++                    sym = self.sourceFont[codepoint]
++                except TypeError:
++                    continue
++                if codepoint != DF_BLOCK_REFERENCE:
++                    sym.transform(mat)
++                sym.width = self.font_dim['width']
++
++
+     def get_iconheight(self, force_single=False):
+         """ Get the target height for a given target variant """
+         single_width_font = self.args.single or force_single
+ 
++        if self.args.df:
++            # DF: use the full line height, as romkatv/nerd-fonts does. The
++            # capHeight clamp below is what makes stock monospaced icons small.
++            return self.font_dim['height']
++
+         iconheight = self.font_dim['height']
+         if single_width_font and self.sourceFont.capHeight > 0 and not isinstance(self.args.cellopt, list):
+             # Limit the icon height on monospaced fonts because very slender and tall icons render
+@@ -1548,6 +1632,9 @@ class font_patcher:
+ 
+         if 'pa' in stretch:
+             # We want to preserve x/y aspect ratio, so find biggest scale factor that allows symbol to fit
++            if self.args.df:
++                # DF: fit against DF_ICON_SCALE cells wide, not one.
++                scale_ratio_x *= DF_ICON_SCALE
+             scale_ratio_x = min(scale_ratio_x, scale_ratio_y)
+             if not self.args.single and not '!' in stretch and scale_ratio_x > 1.0:
+                 if not self.args.upscale:
+@@ -1745,6 +1832,9 @@ class font_patcher:
+             if self.args.single:
+                 # Check and correct the scaling after rounding (if all 3 tries fail we will get a warning later on)
+                 destmaxsize = self.font_dim['width'] * max(1, 1 + (overlap or 0))
++                if self.args.df and 'pa' in stretch:
++                    # DF: 'pa' icons are meant to overhang the cell, see DF_ICON_SCALE.
++                    destmaxsize = max(destmaxsize, self.font_dim['width'] * DF_ICON_SCALE)
+                 for increaser in range(3):
+                     (xmin, _, xmax, _) = self.sourceFont[currentSourceFontGlyph].boundingBox()
+                     sizeerror = (xmax - xmin) - destmaxsize
+@@ -1800,8 +1890,10 @@ class font_patcher:
+                     # Right align
+                     # (not really supported with pa scaling and 2x stretch in NFP)
+                     x_align_distance += cell_width * self.get_target_width(stretch) - sym_dim['width']
+-                if not overlap:
++                if not overlap and not (self.args.df and 'pa' in stretch):
+                     # If symbol glyph is wider than target font cell, just left-align
++                    # DF: our 'pa' icons are wider than the cell on purpose, and
++                    # left-aligning them would push the whole overhang to the right.
+                     x_align_distance = max(self.font_dim['xmin'] - sym_dim['xmin'], x_align_distance)
+ 
+             if overlap:
+@@ -1825,7 +1917,7 @@ class font_patcher:
+ 
+             # Ensure after horizontal adjustments and centering that the glyph
+             # does not overlap the bearings (edges)
+-            if not overlap:
++            if not overlap and not (self.args.df and 'pa' in stretch):
+                 self.remove_glyph_neg_bearings(self.sourceFont[currentSourceFontGlyph])
+ 
+             # Needed for setting 'advance width' on each glyph so they do not overlap,
+@@ -1854,8 +1946,13 @@ class font_patcher:
+ 
+             # Check if the inserted glyph is scaled correctly for monospace
+             if self.args.single:
++                # DF: 'pa' icons are DF_ICON_SCALE cells wide by design, so the
++                # check below would fire on every single one of them.
++                allowed = self.font_dim['width'] * max(1, 1 + (overlap or 0))
++                if self.args.df and 'pa' in stretch:
++                    allowed = max(allowed, self.font_dim['width'] * DF_ICON_SCALE)
+                 (xmin, _, xmax, _) = self.sourceFont[currentSourceFontGlyph].boundingBox()
+-                if (xmax - xmin) > self.font_dim['width'] * max(1, 1 + (overlap or 0)):
++                if (xmax - xmin) > allowed:
+                     logger.warning("Scaled glyph %X wider than one monospace width (%d / %d (overlap %s))",
+                         currentSourceFontGlyph, int(xmax - xmin), self.font_dim['width'], repr(overlap))
+ 
+@@ -2230,6 +2327,7 @@ def setup_arguments():
+     parser.add_argument('--quiet', '-q',                             dest='quiet',            default=False, action='store_true', help='Do not generate verbose output')
+     parser.add_argument('--single-width-glyphs',                     dest='single',           default=False, action='store_true', help='Whether to generate the glyphs as single-width not double-width (default is double-width) (Nerd Font Mono)')
+     parser.add_argument('--use-single-width-glyphs',                 dest='forcemono',        default=False, action='count',      help=argparse.SUPPRESS)
++    parser.add_argument('--df',                                       dest='df',               default=False, action='store_true', help='Apply the dotfiles.fonts deviations: %g cell-width icons and overlapping box-drawing glyphs' % DF_ICON_SCALE)
+     parser.add_argument('--variable-width-glyphs',                   dest='nonmono',          default=False, action='store_true', help='Do not adjust advance width (no "overhang") (Nerd Font Propo)')
+     parser.add_argument('--version', '-v',                           action='version',        version=projectName + ': %(prog)s (' + version + ')', help='Show program\'s version number and exit')
+     # --makegroup has an additional undocumented numeric specifier. '--makegroup' is in fact '--makegroup 1'.
