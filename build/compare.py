@@ -58,9 +58,10 @@ LEGACY = {
 # range, so every glyph in it may move.
 BLOCK_RANGE = range(0x2500, 0x25A0)
 # Everything else our patch may move is an icon, i.e. a glyph the patcher
-# *pasted in*, never one that came from the Meslo source face. So the rule is
-# not a codepoint list but a provenance test: a glyph present in the unpatched
-# source font must be identical between the two builds.
+# pasted in. That is a provenance test rather than a codepoint list, so it stays
+# correct as upstream adds glyph sets -- see compare_to_control() for the exact
+# rule, which is "stock left it identical to the Meslo source", not "the Meslo
+# source has this codepoint".
 #
 # Name IDs rename.py rewrites, plus the ones it drops.
 NAME_IDS_CHANGED = {1, 2, 3, 4, 6, 16, 17, 18, 21, 22}

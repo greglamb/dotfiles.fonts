@@ -99,8 +99,8 @@ It works in four steps, each of which makes the next one meaningful:
 | | claim |
 | --- | --- |
 | 0 | control build == upstream's published binary, glyph for glyph. Until this holds, a difference below could be theirs rather than ours. |
-| 1 | shipped vs control differs only in box drawing, pasted-in icons, and the name IDs `rename.py` rewrites. A glyph that came from the Meslo source face must be untouched — a provenance test, not a codepoint list, so it stays correct as upstream adds glyph sets. |
-| 2 | vs the previous release: coverage moves only where upstream said it would, Latin text does not move, and our box-drawing geometry is unchanged. |
+| 1 | shipped vs control differs only in box drawing, pasted-in icons, and the name IDs `rename.py` rewrites. A glyph the *stock* build left identical to the Meslo source is text, and must be untouched — a provenance test, not a codepoint list, so it stays correct as upstream adds glyph sets. |
+| 2 | vs the previous release: coverage moves only where upstream said it would, and Latin text does not move. Box-drawing artwork is upstream's to change, so movement there is reported as a note; `verify.py` owns the invariant that the half-block seams still close. |
 | 3 | an independent rebuild produces the same glyphs. |
 
 Upstream refactors the scaling code fairly often, so on a bad upgrade expect to
