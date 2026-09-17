@@ -3,11 +3,17 @@ set -euo pipefail
 
 # Build the MesloLGS NF DF family from upstream Nerd Fonts sources.
 #
-#   ./build/build.sh            # build in Docker (reproducible, nothing to install)
+#   ./build/build.sh              # build in Docker (nothing to install)
 #   DF_NATIVE=1 ./build/build.sh  # build with the local fontforge + fonttools
+#   ./build/build.sh --stock      # build WITHOUT our patch, into build/.work/stock
 #
 # The four .ttf files land in the repository root, replacing the vendored ones.
 # Run ./update-hashes.sh afterwards, per the release workflow in that script.
+#
+# --stock produces the same four faces as upstream would, with neither --df nor
+# the rename. It is the control build: build/compare.py diffs it against ours so
+# an upgrade can show that our patch still changes exactly what it is supposed
+# to and nothing else. Nothing in the repository root is touched.
 #
 # What this builds
 # ----------------
@@ -55,6 +61,15 @@ output_face() {
         BoldItalic) echo "MesloLGS NF DF Bold Italic.ttf" ;;
     esac
 }
+
+# --stock builds the unpatched control; see the header.
+DF_STOCK="${DF_STOCK:-0}"
+for arg in "$@"; do
+    case "$arg" in
+        --stock) DF_STOCK=1 ;;
+        *) echo "error: unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -126,6 +141,9 @@ find_fontforge_python() {
 build_native() {
     local src="$WORK_DIR/nerd-fonts"
     local out="$WORK_DIR/out"
+    if [[ "$DF_STOCK" == "1" ]]; then
+        out="$WORK_DIR/stock"
+    fi
     local py
     if ! py="$(find_fontforge_python)"; then
         echo "error: no python3 with the fontforge module." >&2
@@ -141,13 +159,26 @@ build_native() {
     rm -rf "$out"
     mkdir -p "$out"
 
+    # The control build runs the same patched font-patcher without --df, so a
+    # difference between the two can only come from the flag, never from a
+    # different patcher or a different upstream revision.
+    local df_flag="--df"
+    if [[ "$DF_STOCK" == "1" ]]; then
+        df_flag=""
+    fi
+
     local style
     for style in $STYLES; do
         echo "==> Patching $style"
         ( cd "$src" && "$py" ./font-patcher \
             "src/unpatched-fonts/Meslo/S/$(source_face "$style")" \
-            --quiet --mono --complete --df --ext ttf --out "$out" )
+            --quiet --mono --complete $df_flag --ext ttf --out "$out" )
     done
+
+    if [[ "$DF_STOCK" == "1" ]]; then
+        echo "==> Stock control build left in $out (not renamed, repo untouched)"
+        return 0
+    fi
 
     echo "==> Renaming to MesloLGS NF DF"
     for style in $STYLES; do
@@ -165,6 +196,7 @@ build_docker() {
     docker run --rm \
         -v "$REPO_DIR":/df \
         -e DF_NATIVE=1 \
+        -e DF_STOCK="$DF_STOCK" \
         -e DEBIAN_FRONTEND=noninteractive \
         -- "$DF_IMAGE" bash -uexc '
             apt-get update -qq
@@ -188,6 +220,12 @@ main() {
     done
 
     build_native
+
+    if [[ "$DF_STOCK" == "1" ]]; then
+        echo
+        echo "Next: python3 build/compare.py"
+        return 0
+    fi
 
     echo
     echo "==> Built:"

@@ -55,6 +55,10 @@ POWERLINE = [0xE0A0, 0xE0B0, 0xE0B2]
 ICONS = [0xF179, 0xF418, 0xE73C, 0xF024B, 0xEB99, 0xED00]
 # Braille, added upstream in 3.x; a silent casualty if the build is misconfigured.
 BRAILLE = [0x2800, 0x28FF]
+# Font units of slack allowed where two half-blocks meet. Coordinates are
+# rounded to integers, so 1 is reachable without anything being wrong; 0 is what
+# a correct build actually produces.
+SEAM_TOLERANCE = 1
 
 failures = []
 notes = []
@@ -198,6 +202,28 @@ def check_face(path, style):
         if abs(left - right) > cell * 0.05:
             fail("U+{:04X} overhang is lopsided (left {}, right {})".format(cp, left, right))
     ok("{} sampled icons are oversized and centered".format(len(ICONS)))
+
+    # The reason the block transform exists: halves drawn in adjacent cells have
+    # to meet exactly, or prompt frames show hairline seams. Upstream is free to
+    # redraw these glyphs between releases; this is the property that must hold
+    # however they are drawn.
+    halves = [
+        ("vertical", 0x2580, 1, 0x2584, 3),    # upper half bottom == lower half top
+        ("horizontal", 0x2590, 0, 0x258C, 2),  # right half left  == left half right
+    ]
+    for label, cp_a, idx_a, cp_b, idx_b in halves:
+        box_a = bounds(glyphs, cmap, cp_a)
+        box_b = bounds(glyphs, cmap, cp_b)
+        if box_a is None or box_b is None:
+            fail("U+{:04X}/U+{:04X} missing, cannot check the {} seam".format(
+                cp_a, cp_b, label))
+            continue
+        seam = box_a[idx_a] - box_b[idx_b]
+        if abs(seam) > SEAM_TOLERANCE:
+            fail("{} seam between U+{:04X} and U+{:04X} is {} units, not closed"
+                 .format(label, cp_a, cp_b, seam))
+        else:
+            ok("{} half-block seam closes exactly ({:+d} units)".format(label, seam))
 
     for cp in POWERLINE:
         bb = bounds(glyphs, cmap, cp)
