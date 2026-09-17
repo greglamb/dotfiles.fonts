@@ -8,7 +8,7 @@ glyph-geometry changes ported from romkatv's fork: icons are scaled to 1.2 cell
 widths instead of being clamped to one, and box-drawing glyphs overhang the cell
 so prompt frames have no seams. See [build/README.md](build/README.md).
 
-See [MesloLGSNF-web-fonts](https://github.com/greglamb/MesloLGSNF-web-fonts) for Chrome OS support
+See [dotfiles.fonts-web](https://github.com/greglamb/dotfiles.fonts-web) for Chrome OS support
 
 ## Upgrading from 1.x
 
