@@ -84,10 +84,18 @@ TAG="v${VERSION}"
 PREFIX="$(basename "$REPO_SLUG")-${VERSION}"
 echo "Cask version $VERSION -> tag $TAG, archive prefix $PREFIX/"
 
-git -C "$SCRIPT_DIR" fetch origin --tags --quiet
-if ! git -C "$SCRIPT_DIR" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-    echo "Error: tag ${TAG} does not exist. Push the version bump, then:" >&2
-    echo "  git tag ${TAG} && git push origin ${TAG}" >&2
+# Check the REMOTE, not the local repo. GitHub serves the tarball below from
+# the remote tag, so a tag that exists only locally -- created but not yet
+# pushed -- sails past a `git rev-parse refs/tags/...` check and turns this
+# guard's clear message into an opaque 404 from curl further down.
+if ! git -C "$SCRIPT_DIR" ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+    if git -C "$SCRIPT_DIR" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+        echo "Error: tag ${TAG} exists locally but has not been pushed:" >&2
+        echo "  git push origin ${TAG}" >&2
+    else
+        echo "Error: tag ${TAG} does not exist. Push the version bump, then:" >&2
+        echo "  git tag ${TAG} && git push origin ${TAG}" >&2
+    fi
     exit 1
 fi
 
