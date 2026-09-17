@@ -22,6 +22,15 @@ SCOOP_MANIFEST="$SCRIPT_DIR/bucket/dotfiles-fonts.json"
 HOMEBREW_CASK="$SCRIPT_DIR/Casks/dotfiles-fonts.rb"
 REPO_SLUG="greglamb/dotfiles.fonts"
 
+# Portable sha256 (macOS ships shasum, most Linux images only sha256sum)
+sha256() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        sha256sum "$1" | cut -d' ' -f1
+    fi
+}
+
 # Portable in-place sed (GNU sed vs BSD sed)
 sed_i() {
     if sed --version >/dev/null 2>&1; then
@@ -33,10 +42,10 @@ sed_i() {
 
 # Font files in same order as manifest URLs
 FONTS=(
-    "MesloLGS NF Regular.ttf"
-    "MesloLGS NF Bold.ttf"
-    "MesloLGS NF Italic.ttf"
-    "MesloLGS NF Bold Italic.ttf"
+    "MesloLGS NF DF Regular.ttf"
+    "MesloLGS NF DF Bold.ttf"
+    "MesloLGS NF DF Italic.ttf"
+    "MesloLGS NF DF Bold Italic.ttf"
 )
 
 # Generate per-font hashes (used by Scoop)
@@ -46,7 +55,7 @@ for font in "${FONTS[@]}"; do
         echo "Error: Font file not found: $font" >&2
         exit 1
     fi
-    hash=$(shasum -a 256 "$SCRIPT_DIR/$font" | cut -d' ' -f1)
+    hash=$(sha256 "$SCRIPT_DIR/$font")
     HASHES+=("$hash")
     echo "$font: $hash"
 done
@@ -101,7 +110,7 @@ for font in "${FONTS[@]}"; do
 done
 echo "Verified all ${#FONTS[@]} fonts are at ${PREFIX}/ inside the tarball"
 
-TARBALL_SHA=$(shasum -a 256 "$TARBALL_TMP" | cut -d' ' -f1)
+TARBALL_SHA=$(sha256 "$TARBALL_TMP")
 echo "Tarball sha256 = $TARBALL_SHA"
 
 sed_i -E "s|^  sha256 \"[a-f0-9]+\"|  sha256 \"${TARBALL_SHA}\"|" "$HOMEBREW_CASK"
