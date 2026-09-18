@@ -76,7 +76,8 @@ correctly. Ghostty 1.3.1 on macOS: colour from the `SVG` table, monochrome
 defaults, colour with U+FE0F, the ZWJ sequences as one glyph, two cells, and
 Latin, powerline and icons unchanged; and, on the final rules (2026-09-18),
 🌈 🌊 🆗 👩 📈 ⏰ ⌚ ✅ ❌ ⭐ ⚽ in Noto's colour, with ℹ ⏸ ⛈ monochrome and
-colour after U+FE0F.
+colour after U+FE0F; and 👍🏽 👩🏽‍💻 👨‍🦰 as the default 👍 👩‍💻 👨, one glyph
+each.
 
 **Not verified.** Everything below was reasoned from source code and platform
 documentation, never run:
