@@ -74,6 +74,9 @@ output_face() {
 # --stock builds the unpatched control; --fill-only reruns stage 3. See the header.
 DF_STOCK="${DF_STOCK:-0}"
 DF_FILL_ONLY="${DF_FILL_ONLY:-0}"
+# Extra arguments for build/fill.py, e.g. "--emoji-format both" or
+# "--no-sequences"; see `python3 build/fill.py --help`.
+DF_FILL_ARGS="${DF_FILL_ARGS:-}"
 for arg in "$@"; do
     case "$arg" in
         --stock) DF_STOCK=1 ;;
@@ -245,16 +248,18 @@ fill_faces() {
 
     "$SCRIPT_DIR/fetch-sources.sh"
 
-    echo "==> Filling coverage gaps from Noto"
+    echo "==> Filling coverage gaps from Noto${DF_FILL_ARGS:+ ($DF_FILL_ARGS)}"
     rm -rf "$manifests"
     mkdir -p "$manifests"
     for style in $STYLES; do
+        # shellcheck disable=SC2086  # DF_FILL_ARGS is a list of arguments
         "$py" "$SCRIPT_DIR/fill.py" \
             "$renamed/$(output_face "$style")" \
             "$REPO_DIR/$(output_face "$style")" \
             "$style" \
             --sources "$WORK_DIR/sources" \
-            --manifest "$manifests/$style.json"
+            --manifest "$manifests/$style.json" \
+            $DF_FILL_ARGS
     done
 }
 
@@ -267,6 +272,7 @@ build_docker() {
         -e DF_NATIVE=1 \
         -e DF_STOCK="$DF_STOCK" \
         -e DF_FILL_ONLY="$DF_FILL_ONLY" \
+        -e DF_FILL_ARGS="$DF_FILL_ARGS" \
         -e DEBIAN_FRONTEND=noninteractive \
         -- "$DF_IMAGE" bash -uexc '
             apt-get update -qq

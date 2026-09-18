@@ -253,10 +253,66 @@ def check_face(path, style):
     return font, cmap, glyphs
 
 
+def colr_bases(font):
+    """What the COLR table paints: v0 base -> [(layer glyph, palette index)],
+    and v1 base -> clip box (or None). Either may be empty."""
+    v0, v1 = {}, {}
+    colr = font.get("COLR")
+    if colr is None:
+        return v0, v1
+    if colr.version == 0:
+        for base, layers in colr.ColorLayers.items():
+            v0[base] = [(layer.name, layer.colorID) for layer in layers]
+        return v0, v1
+    table = colr.table
+    if table.BaseGlyphRecordArray:
+        records = table.LayerRecordArray.LayerRecord
+        for r in table.BaseGlyphRecordArray.BaseGlyphRecord:
+            v0[r.BaseGlyph] = [(l.LayerGlyph, l.PaletteIndex)
+                               for l in records[r.FirstLayerIndex:r.FirstLayerIndex + r.NumLayers]]
+    if table.BaseGlyphList:
+        clips = table.ClipList.clips if table.ClipList else {}
+        for r in table.BaseGlyphList.BaseGlyphPaintRecord:
+            clip = clips.get(r.BaseGlyph)
+            v1[r.BaseGlyph] = (clip.xMin, clip.yMin, clip.xMax, clip.yMax) if clip else None
+    return v0, v1
+
+
+def glyph_bounds(glyphs, name):
+    pen = BoundsPen(glyphs)
+    glyphs[name].draw(pen)
+    if pen.bounds is None:
+        return None
+    return tuple(round(v) for v in pen.bounds)
+
+
+def ligatures_to(font, feature_tag):
+    """Every ligature glyph reachable through `feature_tag`, with a count of
+    the component sequences that produce it."""
+    out = {}
+    gsub = font.get("GSUB")
+    if gsub is None:
+        return out
+    table = gsub.table
+    indices = set()
+    for record in table.FeatureList.FeatureRecord:
+        if record.FeatureTag == feature_tag:
+            indices.update(record.Feature.LookupListIndex)
+    for index in sorted(indices):
+        for st in table.LookupList.Lookup[index].SubTable:
+            if st.LookupType != 4:
+                continue
+            for ligatures in st.ligatures.values():
+                for lig in ligatures:
+                    out[lig.LigGlyph] = out.get(lig.LigGlyph, 0) + 1
+    return out
+
+
 def check_fill(font, cmap, glyphs, style, manifest_path):
     """The glyphs fill.py added: present, monospaced, inside their cells, and
-    for emoji, painted. The manifest is what fill.py says it did; this checks
-    the face agrees."""
+    for emoji, painted in the format the manifest names; the sequences
+    reachable as ligatures, the selectors present. The manifest is what
+    fill.py says it did; this checks the face agrees."""
     print("\nFill stage ({})".format(os.path.relpath(manifest_path)))
     with open(manifest_path, encoding="utf-8") as handle:
         manifest = json.load(handle)
@@ -265,6 +321,7 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
         return
     filled = manifest["filled"]
     summary = manifest["summary"]
+    policy = manifest["policy"]
     ok("{} codepoints filled ({}); {} Segoe-covered gaps left alone".format(
         summary["filled"],
         ", ".join("{} from {}".format(n, s) for s, n in sorted(summary["by_source"].items())),
@@ -273,78 +330,147 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
     hmtx = font["hmtx"]
     cell = hmtx[cmap[0x41]][0]
     ascent, descent = font["hhea"].ascent, font["hhea"].descent
-    fallthrough = manifest["policy"]["emoji_fallthrough"]
+    emoji_format = policy.get("emoji_format", "colrv1")
+    need_v0 = emoji_format in ("colrv0", "both")
+    need_v1 = emoji_format in ("colrv1", "both")
+    v0, v1 = colr_bases(font)
 
-    colr = font.get("COLR")
-    painted, clips = set(), {}
-    if colr is not None and colr.version == 1:
-        painted = {r.BaseGlyph for r in colr.table.BaseGlyphList.BaseGlyphPaintRecord}
-        if colr.table.ClipList:
-            clips = colr.table.ClipList.clips
+    def inside(box, wide):
+        width = cell * (2 if wide else 1)
+        return (box[0] >= -FIT_TOLERANCE and box[1] >= descent - FIT_TOLERANCE and
+                box[2] <= width + FIT_TOLERANCE and box[3] <= ascent + FIT_TOLERANCE)
 
-    missing, renamed, advance, outside, blank, unpainted, policy = [], [], [], [], [], [], []
+    missing, renamed, advance, outside, blank, unpainted, broken = [], [], [], [], [], [], []
     emoji, mono = 0, 0
+
+    def check_paint(label, name, wide, has_mono):
+        """One emoji glyph, whatever reaches it."""
+        nonlocal emoji, mono
+        emoji += 1
+        if need_v0:
+            layers = v0.get(name)
+            if not layers:
+                unpainted.append(label)
+            else:
+                boxes = [glyph_bounds(glyphs, layer) for layer, _ in layers]
+                if any(b is None for b in boxes):
+                    unpainted.append(label)
+                elif not inside((min(b[0] for b in boxes), min(b[1] for b in boxes),
+                                 max(b[2] for b in boxes), max(b[3] for b in boxes)), wide):
+                    outside.append(label)
+        if need_v1:
+            if name not in v1 or v1[name] is None:
+                unpainted.append(label)
+            elif not inside(v1[name], wide):
+                outside.append(label)
+        ink = glyph_bounds(glyphs, name)
+        if ink is not None:
+            mono += 1
+            if not inside(ink, wide):
+                outside.append(label)
+        if has_mono != (ink is not None):
+            broken.append(label)
+
     for hexcp, entry in sorted(filled.items()):
         cp = int(hexcp, 16)
         if cp not in cmap:
-            missing.append(cp)
+            missing.append(hexcp)
             continue
         name = cmap[cp]
         if name != entry["glyph"]:
-            renamed.append(cp)
+            renamed.append(hexcp)
+        if entry["source"] == fill.GLUE:
+            if hmtx[name][0] != 0 or glyph_bounds(glyphs, name) is not None:
+                broken.append(hexcp)
+            continue
         if hmtx[name][0] != cell:
-            advance.append(cp)
-        width = cell * (2 if entry["wide"] else 1)
-        box = (-FIT_TOLERANCE, descent - FIT_TOLERANCE, width + FIT_TOLERANCE, ascent + FIT_TOLERANCE)
-        inside = lambda b: b[0] >= box[0] and b[1] >= box[1] and b[2] <= box[2] and b[3] <= box[3]
-        ink = bounds(glyphs, cmap, cp)
+            advance.append(hexcp)
         if entry["source"] == fill.EMOJI:
-            emoji += 1
-            clip = clips.get(name)
-            if name not in painted or clip is None:
-                unpainted.append(cp)
-            elif not inside((clip.xMin, clip.yMin, clip.xMax, clip.yMax)):
-                outside.append(cp)
-            if ink is not None:
-                mono += 1
-        elif ink is None:
-            blank.append(cp)
-        if ink is not None and not inside(ink):
-            outside.append(cp)
+            check_paint(hexcp, name, entry["wide"], entry["mono"])
+        else:
+            ink = glyph_bounds(glyphs, name)
+            if ink is None:
+                blank.append(hexcp)
+            elif not inside(ink, entry["wide"]):
+                outside.append(hexcp)
         # The rules fill.py is supposed to follow.
         if fill.skip_reason(cp):
-            policy.append(cp)
+            broken.append(hexcp)
         if entry["source"] != fill.EMOJI and not entry["segoe"]:
-            policy.append(cp)
-        if entry["source"] == fill.EMOJI and entry["segoe"] and not fallthrough:
-            policy.append(cp)
+            broken.append(hexcp)
+        if entry["source"] == fill.EMOJI and entry["segoe"] and not policy["emoji_fallthrough"]:
+            broken.append(hexcp)
 
-    for cps, what in ((missing, "not mapped by the face"),
-                      (renamed, "mapped to a different glyph than recorded"),
-                      (advance, "not one cell of advance"),
-                      (blank, "filled with a blank glyph"),
-                      (outside, "ink outside its cell box"),
-                      (unpainted, "emoji with no COLRv1 paint or clip box"),
-                      (policy, "filled against the fill rules")):
-        if cps:
-            fail("{} filled codepoint(s) {}: {}".format(
-                len(cps), what, ", ".join("U+{:04X}".format(c) for c in cps[:6])))
+    order = set(font.getGlyphOrder())
+    for hexseq, entry in sorted(manifest.get("sequences", {}).items()):
+        if entry["glyph"] not in order:
+            missing.append(hexseq)
+            continue
+        if any(fill.is_modifier(int(h, 16)) for h in hexseq.split("_")):
+            broken.append(hexseq)
+        if not entry.get("shared"):
+            check_paint(hexseq, entry["glyph"], True, entry["mono"])
+    for hexcp, entry in sorted(manifest.get("presentation", {}).items()):
+        if entry["glyph"] not in order:
+            missing.append(hexcp + " FE0F")
+            continue
+        if not entry.get("shared"):
+            check_paint(hexcp + " FE0F", entry["glyph"], True, entry["mono"])
+
+    for items, what in ((missing, "not in the face"),
+                        (renamed, "mapped to a different glyph than recorded"),
+                        (advance, "not one cell of advance"),
+                        (blank, "filled with a blank glyph"),
+                        (outside, "ink outside its cell box"),
+                        (unpainted, "emoji with no {} paint".format(emoji_format)),
+                        (broken, "against the fill rules or the manifest")):
+        if items:
+            fail("{} filled item(s) {}: {}".format(len(items), what, ", ".join(items[:6])))
     if not (missing or renamed or advance):
         ok("every filled codepoint maps to its glyph at one cell of advance")
     if not (outside or blank):
         ok("ink of every filled glyph is inside its cell box (tolerance {})".format(FIT_TOLERANCE))
     if emoji:
-        if colr is None or "CPAL" not in font:
+        if "COLR" not in font or "CPAL" not in font:
             fail("emoji were filled but there is no COLR/CPAL table")
         elif not unpainted:
-            ok("{} emoji carry COLRv1 paint; {} of them have a monochrome fallback outline".format(
-                emoji, mono))
-        if len(painted) != emoji:
-            fail("COLR paints {} base glyphs but the manifest lists {} emoji".format(
-                len(painted), emoji))
-    elif colr is not None:
+            ok("{} emoji glyphs painted as {}; {} of them have a monochrome fallback outline".format(
+                emoji, emoji_format, mono))
+        painted = len(v0) if need_v0 else len(v1)
+        if painted != emoji:
+            fail("COLR paints {} base glyphs but the manifest accounts for {}".format(painted, emoji))
+        if need_v0 and need_v1 and set(v0) != set(v1):
+            fail("COLRv0 and COLRv1 paint different glyph sets")
+    elif "COLR" in font:
         fail("no emoji were filled but the face has a COLR table")
-    if not policy:
+
+    sequences = manifest.get("sequences", {})
+    if sequences:
+        reachable = ligatures_to(font, fill.LIGATURE_FEATURE)
+        unreachable = [h for h, e in sorted(sequences.items()) if e["glyph"] not in reachable]
+        total = sum(reachable.get(e["glyph"], 0) for e in sequences.values()
+                    if not e.get("shared"))
+        if unreachable:
+            fail("{} sequence(s) not reachable through '{}': {}".format(
+                len(unreachable), fill.LIGATURE_FEATURE, ", ".join(unreachable[:4])))
+        elif total != summary["ligatures"]:
+            fail("'{}' has {} ligature entries for the sequences, manifest says {}".format(
+                fill.LIGATURE_FEATURE, total, summary["ligatures"]))
+        else:
+            ok("{} ZWJ sequences reachable through '{}' ({} ligature entries)".format(
+                len(sequences), fill.LIGATURE_FEATURE, total))
+    uvs = manifest.get("variation_sequences", {})
+    if uvs:
+        table = next((t for t in font["cmap"].tables if t.format == 14), None)
+        have = {cp: g for cp, g in table.uvsDict.get(0xFE0F, [])} if table else {}
+        wrong = [h for h, g in sorted(uvs.items()) if int(h, 16) not in have or have[int(h, 16)] != g]
+        if wrong:
+            fail("{} U+FE0F variation sequence(s) missing or wrong: {}".format(
+                len(wrong), ", ".join(wrong[:6])))
+        else:
+            ok("{} U+FE0F variation sequences present ({} to an extra emoji glyph)".format(
+                len(uvs), len([g for g in uvs.values() if g])))
+    if not broken:
         ok("fill rules respected (Segoe-covered gaps monochrome, exclusions honoured)")
 
 
