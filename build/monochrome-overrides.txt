@@ -1,0 +1,13 @@
+# Codepoints fill.py fills in monochrome whatever the other rules say.
+#
+# Rule 1 in build/README.md. Without an entry here, a gap Unicode shows as an
+# emoji by default is filled in colour from Noto Color Emoji (rules 2 and 4).
+# List one here to have it monochrome instead, from Noto Sans Symbols 2, else
+# Noto Sans Symbols, else Noto Emoji. If Unicode defines a U+FE0F sequence for
+# it, that still gets the colour form; if not, it is monochrome for good. The
+# opposite list is colour-overrides.txt.
+#
+# One codepoint or range per line, hex, with # comments; the same format as
+# charsets/ (read by charset.load). A codepoint none of those three fonts has
+# stops the build. One the face already maps is reported and left alone.
+# Rebuild with ./build/build.sh --fill-only.

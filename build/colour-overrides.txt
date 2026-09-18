@@ -1,0 +1,14 @@
+# Codepoints fill.py fills in colour whatever the other rules say.
+#
+# Rule 1 in build/README.md. Without an entry here, a gap Segoe UI Symbol
+# covers is colour only if Unicode shows it as an emoji by default (rule 2),
+# and monochrome otherwise (rule 3). List one here to have it in colour anyway:
+# the glyph from Noto Color Emoji, with the monochrome Noto Emoji outline kept
+# only as the fallback for renderers without colour. The opposite list is
+# monochrome-overrides.txt.
+#
+# One codepoint or range per line, hex, with # comments; the same format as
+# charsets/ (read by charset.load). A codepoint Noto Color Emoji does not draw
+# in colour stops the build. One the face already maps is reported and left
+# alone: this decides how a gap is filled, it never replaces a glyph the
+# patcher put there. Rebuild with ./build/build.sh --fill-only.

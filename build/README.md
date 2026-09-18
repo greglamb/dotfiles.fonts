@@ -12,7 +12,9 @@ rest of the path.
 
 `MesloLGS NF DF` is upstream [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)
 `Meslo LG S` built with `--mono --complete`, plus two glyph-geometry changes
-carried in `patches/`.
+carried in `patches/`, plus a third stage that fills the codepoints upstream
+leaves unmapped from the Noto symbol and emoji fonts (see **Filling the gaps**
+below).
 
 Those two changes are not ours originally. They come from
 [romkatv/nerd-fonts](https://github.com/romkatv/nerd-fonts), the fork that
@@ -44,7 +46,202 @@ builds stock Nerd Fonts output without it — useful when you want to tell
 Notably *not* customised: the Latin glyphs (the source
 `Meslo LG S ... for Powerline.ttf` faces are byte-identical across Nerd Fonts
 releases, and to the ones romkatv used, so ordinary text does not move when
-this is rebuilt), the line metrics, and the advance width.
+this is rebuilt), the line metrics, and the advance width. The fill stage only
+ever *adds* glyphs, after upstream's, and never touches one that is there.
+
+## Filling the gaps
+
+After the patcher and the rename, `fill.py` looks at every codepoint a face
+still does not map -- a *gap* -- and decides each one by these rules, in
+order; the first that matches wins:
+
+| | the gap | it is filled from | drawn in |
+| --- | --- | --- | --- |
+| 0 | is a control, format character, variation selector, Private Use codepoint or regional indicator | nothing | -- |
+| 1 | is listed in `colour-overrides.txt` / `monochrome-overrides.txt` | Noto Color Emoji / rule 3's sources | colour / monochrome |
+| 2 | is mapped by Segoe UI Symbol, and Unicode shows it as an emoji by default | Noto Color Emoji | colour |
+| 3 | is mapped by Segoe UI Symbol | Noto Sans Symbols 2, else Noto Sans Symbols, else Noto Emoji; if none has it, nothing | monochrome |
+| 4 | is mapped by Noto Color Emoji | Noto Color Emoji | colour |
+| 5 | anything else | nothing; it stays a gap | -- |
+
+On top of that, the ZWJ sequences and the U+FE0F selector (next section).
+
+**Rule 3** is the heart of it. Segoe UI Symbol is the reference for "this is
+a monochrome symbol": it is the face Windows draws these codepoints with, so
+whatever it covers we cover in monochrome too, from the two Noto symbol fonts,
+whose license lets us ship them. The `else Noto Emoji` is for the text-style
+emoji that Segoe UI Symbol carries but the Noto symbol fonts leave to the
+emoji fonts: those take Noto Emoji, the monochrome sister of Noto Color Emoji.
+`fill.py --no-emoji-fallthrough` leaves them as gaps instead.
+
+**Rule 2** carves out what Unicode itself treats as an emoji. Segoe UI Symbol
+also carries Microsoft's monochrome emoji from before Windows had colour ones:
+865 of the gaps it covers are `Emoji_Presentation=Yes` in Unicode's
+`emoji-data.txt` -- shown as an emoji by default -- such as 🌈 🆗 👩 ⏰ ✅ ⭐.
+Those take the colour glyph. Two reasons. It is what every system emoji font
+does with them, and before this stage the face did not map them, so they were
+colour already; filling them monochrome would take that away. And for most of
+them Unicode defines no U+FE0E/U+FE0F pair, so no selector could ask for the
+colour form back: monochrome would be monochrome for good. `emoji-data.txt` is
+pinned by `fetch-sources.sh` at Unicode 16.0, the version the Noto Color Emoji
+pin draws.
+
+**Rule 1** is for taste, one codepoint at a time. `monochrome-overrides.txt`
+sends an emoji back to rule 3's monochrome sources (✅ if a prompt should take
+the terminal's text colour, say); `colour-overrides.txt` sends a text-style
+symbol to Noto Color Emoji. Both take the charset format -- hex codepoints or
+ranges, `#` comments -- and ship empty. A codepoint the named source cannot
+draw, or one listed in both, stops the build. One the face already maps (❤ and
+☀ are Meslo's own) is reported and left alone, because the lists decide how a
+gap is filled and never replace a glyph the patcher put there. After editing
+either, `./build/build.sh --fill-only`.
+
+**Rule 4** is for the emoji newer than Segoe UI Symbol (🥺 🫠 🫶), which have
+nothing to be monochrome by.
+
+**Rule 0.** Never filled, whatever the sources map: controls, format
+characters (tag characters), variation selectors, Private Use (Segoe's
+U+E000–U+E2FF), and the regional indicator letters -- a flag is a *pair* of
+those, and leaving both halves unmapped is what lets the system emoji font
+compose it. The one exception is U+200D and U+FE0F, which get empty
+zero-width glyphs because the sequences below need them in the face.
+
+Against Nerd Fonts 3.5.1 the Regular face gains 2901 codepoints: 1149 from
+Noto Sans Symbols 2, 567 from Noto Sans Symbols and 9 from Noto Emoji
+(rule 3), 1174 from Noto Color Emoji (865 by rule 2, 309 by rule 4), and the
+two zero-width glyphs.
+2432 Segoe-covered gaps stay gaps because no Noto font has them (Greek, the
+mathematical alphanumerics, general punctuation, ...). The italic faces gain a
+few hundred more, because their Meslo sources map fewer symbols to begin with.
+
+Segoe UI Symbol itself is Microsoft's and cannot be checked in, but its
+character set is not copyrightable, so that is what is checked in:
+`charsets/segoe-ui-symbol.txt`, generated by `charset.py` from
+`C:\Windows\Fonts\seguisym.ttf`. Its header records the version it came from;
+regenerate it when a Windows release ships a newer one.
+
+### Sequences and the presentation selector
+
+Noto Color Emoji draws its ZWJ sequences (families, professions, the rainbow
+and pirate flags, ❤️‍🔥 and so on) through GSUB ligatures, and those come over
+too: 237 of them at Noto 2.051, under the `ccmp` feature, which shapers apply
+by default and terminals do not let users switch off. Every sequence with a
+skin tone (U+1F3FB–U+1F3FF) or hair component (U+1F9B0–U+1F9B3) is left out;
+they are three quarters of Noto's sequences and would multiply the glyph
+count. Instead they fold onto what is kept, through ligatures to glyphs the
+face already has: a skin tone after an emoji becomes that emoji (👍🏽 draws
+👍), a person followed by U+200D and a hair component becomes the person, and
+a toned ZWJ sequence becomes its untoned form (👩🏽‍💻 draws 👩‍💻). That is 677
+ligature entries, about 6 KB, and no glyph. A sequence keeps its U+200D
+joiners, and after any component whose emoji presentation is opt-in -- where
+the RGI sequences carry U+FE0F -- three spellings reach it: the plain glyph,
+the plain glyph and U+FE0F, and the colour glyph the format 14 cmap below
+maps the pair to, which is what HarfBuzz and CoreText hand GSUB once they have
+resolved the selector. So `1F3F3 FE0F 200D 1F308` and `1F3F3 200D 1F308` both
+reach the flag in every shaper. Keycaps render as their parts.
+
+U+FE0F on its own gets its meaning as well, through a format 14 cmap
+subtable: `<symbol> FE0F` selects the colour emoji wherever the plain glyph is
+monochrome (☺ vs ☺️, ⚠ vs ⚠️, ❤ vs ❤️, ℹ vs ℹ️). There is one selector for
+each of the 371 variation sequences Unicode defines, and no others: a
+selector Unicode does not define is one nobody types and Ghostty drops. That
+is enough for every emoji rule 3 draws in monochrome: those are all text by
+default, and Unicode gives every text-by-default emoji a variation sequence.
+Only an entry in `monochrome-overrides.txt` can make an emoji with no colour
+selector. Where the plain glyph is already the colour emoji the selector just
+resolves to it. `fill.py --no-sequences` leaves
+all of this section out.
+
+How a terminal reaches all this differs. One that shapes with the font's own
+GSUB and cmap uses the ligatures and the selectors as described (Chromium
+does; kitty, WezTerm, Windows Terminal, iTerm2 and VTE are expected to).
+Ghostty 1.3 shapes with the GSUB, so a sequence like 👩‍💻 is our ligature, but
+it strips U+FE0F before shaping and uses it only to pick a font whose glyph
+for the codepoint is colour. For ℹ️, and for sequences with a U+FE0F inside
+such as 🏳️‍🌈 and ❤️‍🔥, that means the system emoji font (Apple Color Emoji
+on macOS) rather than our glyph: still colour and still one glyph, in Apple's
+artwork. Alacritty does not shape with the font's GSUB at all. Every emoji is
+laid out two cells wide.
+
+### How the glyphs are fitted
+
+Every added glyph gets the cell advance, so the face stays monospaced. Its ink
+is scaled down (never up) to fit one cell, or two for East Asian Wide
+codepoints, which is how terminals lay those out; centred horizontally, kept on
+the baseline. Symbols come from the unhinted Noto builds and carry no
+instructions. The bold faces take Noto Sans Symbols Bold and Noto Emoji at
+weight 700; the italic faces stay upright, like the icons do.
+
+### Emoji are COLRv0 and SVG, with a monochrome fallback
+
+Noto Color Emoji ships as CBDT bitmaps and as COLRv1 vectors. Neither works in
+a text face as it is: a scalable font's bitmap strikes are only used at
+exactly their pixel size, so CBDT would never show, and COLRv1 is not rendered
+by Windows Terminal (won't-fix) or by anything on macOS (CoreText has no
+COLRv1), which would leave those drawing blanks -- and *not* falling back to
+the system emoji font either, because a mapped glyph is a mapped glyph.
+
+So `fill.py` flattens Noto's COLRv1 paint graphs into COLRv0 layers: one
+outline per fill, each naming a `CPAL` colour. Solid fills come through
+exactly; a gradient becomes its area-weighted average colour, and the alpha
+masks Noto uses to fade a layer become that alpha. It is what Segoe UI Emoji
+and Twemoji ship as, and the vector colour format with the widest reach:
+Windows Terminal, CoreText (iTerm2, Terminal.app, kitty on macOS), Chromium,
+Firefox, and FreeType itself, which since 2.10 blends COLRv0 layers whenever a
+client asks it for colour, so kitty, WezTerm, foot, Alacritty and VTE on Linux
+all get it without doing anything. A quarter of Noto's emoji use a visible
+gradient, so the faces look like Noto's flat older design rather than its
+current shaded one.
+
+The same flat layers go into an OpenType `SVG` table as well, one `<path>` per
+layer, sixteen glyphs per gzip-compressed document. That is for the CoreText
+apps that decide a glyph is colour by looking for an `sbix` or `SVG` table
+rather than asking CoreText: Ghostty on macOS is one, and without it draws
+these emoji in monochrome. (An `sbix` table would not do: Ghostty then treats
+*every* glyph as colour, text included.) CoreText renders OpenType SVG since
+macOS 10.14, Firefox and DirectWrite too; Chromium ignores the table and uses
+the COLR layers. One caveat: FreeType hands a client that asks for colour the
+SVG glyph instead of the COLR layers unless it passes `FT_LOAD_NO_SVG`, and a
+client with no SVG renderer then draws nothing. WezTerm and Ghostty pass the
+flag, kitty reads the COLR layers directly, foot and VTE render the SVG; but
+Alacritty does none of those and shows these emoji blank. `--no-svg` drops the
+table (2.1 MB per face) and gives Alacritty its colour back, at the cost of
+Ghostty on macOS.
+
+`--emoji-format colrv1` embeds the paint graphs themselves instead of the
+COLRv0 layers: gradients where they are rendered (Chromium, Firefox, VTE,
+kitty on Linux), the SVG or the fallback everywhere else. `--emoji-format
+both` ships the two side by side and lets each renderer take the best it can
+draw, at +2.7 MB per face and 61,000 of the 65,535 glyphs a TrueType font can
+hold. `DF_FILL_ARGS` passes these through `build.sh`.
+
+Whatever the format, every emoji glyph (sequences included) also carries the
+matching Noto Emoji outline in `glyf`, which is what a renderer with no colour
+support at all draws. The trade-off of the stage as a whole stands: a
+codepoint we fill is one the system emoji font no longer gets to draw.
+
+### Sources
+
+`fetch-sources.sh` pins them by version and sha256 into `.work/sources`: Noto
+Sans Symbols 2.003, Noto Sans Symbols 2 2.008, Noto Color Emoji 2.051 (the
+COLRv1 build) and Noto Emoji 3.002. All are SIL Open Font License 1.1, which
+is also why the faces as a whole are distributed under it; `rename.py` writes
+that into name IDs 13 and 14, and `fill.py` appends each Noto font's copyright
+line to name ID 0. [Noto License.txt](../Noto%20License.txt) in the repository
+root is the notice that ships with the faces, next to `MesloLGS NF DF
+License.txt` and `Nerd Fonts License.txt`. Next to them, Unicode 16.0's `emoji-data.txt`, which
+rule 2 reads and nothing ships; bump it with Noto Color Emoji, so the two agree
+on what is an emoji. To bump one: edit the pin, then
+`./build/build.sh --fill-only`, then `verify.py` and `compare.py` as below.
+
+### Cost
+
+About +6 MB per face (3.0 MB to 9.2 MB) and +27,500 glyphs (13,600 to
+41,100): the 24,000 COLRv0 layer outlines and the SVG table are most of it,
+the symbols and the monochrome glyphs the rest. `.work/fill/<style>.json`, the
+manifest the stage writes per face, lists every codepoint, sequence and
+selector added with its source and cell width; `verify.py` and `compare.py`
+read it.
 
 ## Releasing, and upgrading to a newer Nerd Fonts
 
@@ -56,6 +253,7 @@ $EDITOR build/build.sh                 # bump NF_VERSION
 
 # 2. Build. git apply fails loudly if the patch no longer applies.
 ./build/build.sh
+./build/build.sh --fill-only          # reruns just the gap fill (seconds, no fontforge)
 
 # 3. Keep a copy of what you are replacing, for the regression diff
 git worktree add /tmp/prev HEAD        # or any checkout of the last release
@@ -88,8 +286,9 @@ They fail on different things, and an upgrade can break either one alone.
 
 `verify.py` asks **is this a good font**: monospaced, line height unmoved, icons
 oversized and centered, block glyphs overhanging, braille and Font Awesome 6
-present, every cheat-sheet entry resolving. It catches a patch hunk that stopped
-applying.
+present, every cheat-sheet entry resolving, and every glyph the fill stage
+recorded present, inside its cell and (for emoji) painted. It catches a patch
+hunk that stopped applying.
 
 `compare.py` asks **is this font different from stock in exactly the ways we
 intended**. It catches the subtler failure: a re-anchored hunk that still
@@ -99,7 +298,7 @@ It works in four steps, each of which makes the next one meaningful:
 | | claim |
 | --- | --- |
 | 0 | control build == upstream's published binary, glyph for glyph. Until this holds, a difference below could be theirs rather than ours. |
-| 1 | shipped vs control differs only in box drawing, pasted-in icons, and the name IDs `rename.py` rewrites. A glyph the *stock* build left identical to the Meslo source is text, and must be untouched — a provenance test, not a codepoint list, so it stays correct as upstream adds glyph sets. |
+| 1 | shipped vs control differs only in box drawing, pasted-in icons, the name IDs `rename.py` rewrites (and the source copyrights `fill.py` adds to ID 0), and the codepoints the fill manifest lists, appended after stock's glyphs. A glyph the *stock* build left identical to the Meslo source is text, and must be untouched — a provenance test, not a codepoint list, so it stays correct as upstream adds glyph sets. |
 | 2 | vs the previous release: coverage moves only where upstream said it would, and Latin text does not move. Box-drawing artwork is upstream's to change, so movement there is reported as a note; `verify.py` owns the invariant that the half-block seams still close. |
 | 3 | an independent rebuild produces the same glyphs. |
 
@@ -116,15 +315,28 @@ the timestamp is the only difference. It follows that the `.ttf` files have to
 be committed rather than rebuilt on demand, and that the Scoop hashes in
 `bucket/` pin the committed files specifically.
 
+The glyphs themselves depend on the CPU. FontForge on arm64 draws about 300
+Nerd Font icons with other point counts and start points than the amd64 build
+upstream releases with, so section 0 fails on arm64. `build.sh` therefore runs
+its container as `linux/amd64` everywhere (`DF_PLATFORM` overrides it), under
+emulation on Apple Silicon; `DF_NATIVE=1` on an arm64 machine gives the arm64
+glyphs. The fill stage is the same on both, and `fill.py` sorts the sequence
+ligatures itself so that fontTools 4.46 and 4.65 write the same `GSUB`.
+
 
 ## Files
 
 | | |
 | --- | --- |
-| `build.sh` | fetch + patch upstream, run font-patcher, rename. `--stock` builds the unpatched control |
+| `HANDOFF.md` | state of the unreleased fill-stage work: what is verified, what is left, known issues. Delete once released |
+| `build.sh` | fetch + patch upstream, run font-patcher, rename, fill. `--stock` builds the unpatched control, `--fill-only` reruns the fill |
 | `patches/0001-df-icon-and-block-scaling.patch` | the two changes, against upstream `font-patcher` |
-| `rename.py` | rewrites the name table to the `MesloLGS NF DF` family |
+| `rename.py` | rewrites the name table to the `MesloLGS NF DF` family, license fields included |
+| `fill.py` | fills coverage gaps from the Noto fonts, per the rules above, with the ZWJ sequences, U+FE0F selectors and the COLRv0 + SVG colour tables; writes a manifest per face |
+| `colour-overrides.txt`, `monochrome-overrides.txt` | rule 1: codepoints to fill in colour, or in monochrome, whatever the other rules say; edit by hand, then `./build/build.sh --fill-only` |
+| `fetch-sources.sh` | downloads the pinned Noto sources `fill.py` copies from, and Unicode's `emoji-data.txt` |
+| `charset.py` | dumps a font's character set as a range list; `charsets/segoe-ui-symbol.txt` is its output for Segoe UI Symbol |
 | `verify.py` | release gate: is this a good font |
 | `compare.py` | release gate: is every difference from stock one we intended |
 | `fetch-release.sh` | downloads upstream's published faces for `compare.py` section 0 |
-| `.work/` | cached upstream checkout, control build, and intermediate output (git-ignored) |
+| `.work/` | cached upstream checkout, control build, Noto sources, renamed faces, fill manifests (git-ignored) |

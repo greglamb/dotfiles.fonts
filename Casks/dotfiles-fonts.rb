@@ -1,5 +1,5 @@
 cask "dotfiles-fonts" do
-  version "2.0.0"
+  version "2.1.0"
   sha256 "7d291ea3cd320156aa63ee68626bff6b20df371f8e5e9d43525711d7da363e07"
 
   url "https://github.com/greglamb/dotfiles.fonts/archive/refs/tags/v#{version}.tar.gz"
@@ -16,11 +16,13 @@ cask "dotfiles-fonts" do
   font "dotfiles.fonts-#{version}/MesloLGS NF DF Bold Italic.ttf"
 
   caveats <<~EOS
-    This release renames the family from "MesloLGS NF" to "MesloLGS NF DF".
-    Anything still configured for the old name falls back to another font until
-    you point it at "MesloLGS NF DF". The old faces are not removed for you:
+    Since 2.1.0 the faces carry their own symbols and emoji, drawn from the Noto
+    fonts, so characters another font used to supply now come from this one.
 
-      brew uninstall --cask dotfiles-fonts  # if you installed 1.x via this cask
-      rm ~/Library/Fonts/MesloLGS\\ NF*.ttf   # if you installed them by hand
+    Coming from 1.x: the family is now "MesloLGS NF DF" (it was "MesloLGS NF").
+    Point your terminal at the new name, and if the old faces are still in
+    ~/Library/Fonts, remove them:
+
+      rm ~/Library/Fonts/MesloLGS\\ NF\\ {Regular,Bold,Italic,Bold\\ Italic}.ttf
   EOS
 end
