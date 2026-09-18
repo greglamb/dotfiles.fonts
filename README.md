@@ -6,7 +6,11 @@ terminal and editor use with powerline/icon support.
 Built from upstream Nerd Fonts sources by [`build/build.sh`](build/), with two
 glyph-geometry changes ported from romkatv's fork: icons are scaled to 1.2 cell
 widths instead of being clamped to one, and box-drawing glyphs overhang the cell
-so prompt frames have no seams. See [build/README.md](build/README.md).
+so prompt frames have no seams. A third stage then fills the codepoints Nerd
+Fonts leaves unmapped: monochrome symbols from Noto Sans Symbols / Symbols 2
+wherever Segoe UI Symbol would draw one, and emoji from Noto Color Emoji
+(COLRv1, with a monochrome fallback for renderers without it). See
+[build/README.md](build/README.md).
 
 See [dotfiles.fonts-web](https://github.com/greglamb/dotfiles.fonts-web) for Chrome OS support
 
@@ -90,3 +94,7 @@ Fonts are installed per-user (no admin required).
 ## License
 
 Apache License 2.0 - See [MesloLGS NF DF License.txt](MesloLGS%20NF%20DF%20License.txt)
+
+The symbols and emoji added by the build's fill stage are from Noto Sans
+Symbols, Noto Sans Symbols 2, Noto Color Emoji and Noto Emoji, SIL Open Font
+License 1.1 - See [Noto License.txt](Noto%20License.txt)

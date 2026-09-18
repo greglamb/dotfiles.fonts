@@ -11,10 +11,16 @@ outlines against them:
 
     python3 build/verify.py --baseline /path/to/old/fonts
 
+When build/.work/fill/<style>.json is present (fill.py writes it during the
+build) the glyphs the fill stage added are checked too: each maps, keeps the
+cell advance, has its ink inside its one or two cells, and the emoji carry a
+COLRv1 paint. Pass --manifests DIR to read them from elsewhere.
+
 Exits non-zero if any check fails.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -24,6 +30,9 @@ try:
     from fontTools.pens.recordingPen import RecordingPen
 except ImportError:
     sys.exit("verify.py: fontTools is not installed (pip install fonttools)")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fill  # noqa: E402  (skip_reason, the fill stage's own exclusions)
 
 FAMILY = "MesloLGS NF DF"
 
@@ -59,6 +68,16 @@ BRAILLE = [0x2800, 0x28FF]
 # rounded to integers, so 1 is reachable without anything being wrong; 0 is what
 # a correct build actually produces.
 SEAM_TOLERANCE = 1
+# Font units a filled glyph's ink may stick out of its cell box: fill.py fits
+# in floating point and the outline is then rounded to integers.
+FIT_TOLERANCE = 2
+# Manifest file per face, as fill.py names them.
+MANIFEST = {
+    "Regular": "Regular.json",
+    "Bold": "Bold.json",
+    "Italic": "Italic.json",
+    "Bold Italic": "BoldItalic.json",
+}
 
 failures = []
 notes = []
@@ -234,6 +253,101 @@ def check_face(path, style):
     return font, cmap, glyphs
 
 
+def check_fill(font, cmap, glyphs, style, manifest_path):
+    """The glyphs fill.py added: present, monospaced, inside their cells, and
+    for emoji, painted. The manifest is what fill.py says it did; this checks
+    the face agrees."""
+    print("\nFill stage ({})".format(os.path.relpath(manifest_path)))
+    with open(manifest_path, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    if manifest.get("style") != os.path.splitext(MANIFEST[style])[0]:
+        fail("manifest is for {!r}, not {}".format(manifest.get("style"), style))
+        return
+    filled = manifest["filled"]
+    summary = manifest["summary"]
+    ok("{} codepoints filled ({}); {} Segoe-covered gaps left alone".format(
+        summary["filled"],
+        ", ".join("{} from {}".format(n, s) for s, n in sorted(summary["by_source"].items())),
+        summary["unfilled_segoe"]))
+
+    hmtx = font["hmtx"]
+    cell = hmtx[cmap[0x41]][0]
+    ascent, descent = font["hhea"].ascent, font["hhea"].descent
+    fallthrough = manifest["policy"]["emoji_fallthrough"]
+
+    colr = font.get("COLR")
+    painted, clips = set(), {}
+    if colr is not None and colr.version == 1:
+        painted = {r.BaseGlyph for r in colr.table.BaseGlyphList.BaseGlyphPaintRecord}
+        if colr.table.ClipList:
+            clips = colr.table.ClipList.clips
+
+    missing, renamed, advance, outside, blank, unpainted, policy = [], [], [], [], [], [], []
+    emoji, mono = 0, 0
+    for hexcp, entry in sorted(filled.items()):
+        cp = int(hexcp, 16)
+        if cp not in cmap:
+            missing.append(cp)
+            continue
+        name = cmap[cp]
+        if name != entry["glyph"]:
+            renamed.append(cp)
+        if hmtx[name][0] != cell:
+            advance.append(cp)
+        width = cell * (2 if entry["wide"] else 1)
+        box = (-FIT_TOLERANCE, descent - FIT_TOLERANCE, width + FIT_TOLERANCE, ascent + FIT_TOLERANCE)
+        inside = lambda b: b[0] >= box[0] and b[1] >= box[1] and b[2] <= box[2] and b[3] <= box[3]
+        ink = bounds(glyphs, cmap, cp)
+        if entry["source"] == fill.EMOJI:
+            emoji += 1
+            clip = clips.get(name)
+            if name not in painted or clip is None:
+                unpainted.append(cp)
+            elif not inside((clip.xMin, clip.yMin, clip.xMax, clip.yMax)):
+                outside.append(cp)
+            if ink is not None:
+                mono += 1
+        elif ink is None:
+            blank.append(cp)
+        if ink is not None and not inside(ink):
+            outside.append(cp)
+        # The rules fill.py is supposed to follow.
+        if fill.skip_reason(cp):
+            policy.append(cp)
+        if entry["source"] != fill.EMOJI and not entry["segoe"]:
+            policy.append(cp)
+        if entry["source"] == fill.EMOJI and entry["segoe"] and not fallthrough:
+            policy.append(cp)
+
+    for cps, what in ((missing, "not mapped by the face"),
+                      (renamed, "mapped to a different glyph than recorded"),
+                      (advance, "not one cell of advance"),
+                      (blank, "filled with a blank glyph"),
+                      (outside, "ink outside its cell box"),
+                      (unpainted, "emoji with no COLRv1 paint or clip box"),
+                      (policy, "filled against the fill rules")):
+        if cps:
+            fail("{} filled codepoint(s) {}: {}".format(
+                len(cps), what, ", ".join("U+{:04X}".format(c) for c in cps[:6])))
+    if not (missing or renamed or advance):
+        ok("every filled codepoint maps to its glyph at one cell of advance")
+    if not (outside or blank):
+        ok("ink of every filled glyph is inside its cell box (tolerance {})".format(FIT_TOLERANCE))
+    if emoji:
+        if colr is None or "CPAL" not in font:
+            fail("emoji were filled but there is no COLR/CPAL table")
+        elif not unpainted:
+            ok("{} emoji carry COLRv1 paint; {} of them have a monochrome fallback outline".format(
+                emoji, mono))
+        if len(painted) != emoji:
+            fail("COLR paints {} base glyphs but the manifest lists {} emoji".format(
+                len(painted), emoji))
+    elif colr is not None:
+        fail("no emoji were filled but the face has a COLR table")
+    if not policy:
+        ok("fill rules respected (Segoe-covered gaps monochrome, exclusions honoured)")
+
+
 def check_csv(cmap, csv_path):
     print("\nCheat-sheet coverage ({})".format(csv_path))
     total = 0
@@ -260,10 +374,12 @@ def check_csv(cmap, csv_path):
 
 def check_baseline(baseline_dir, built):
     print("\nAgainst baseline {}".format(baseline_dir))
-    for style, _ in FACES:
+    for style, filename in FACES:
         old_path = os.path.join(baseline_dir, LEGACY[style])
         if not os.path.isfile(old_path):
-            print("  skip {} (no {})".format(style, LEGACY[style]))
+            old_path = os.path.join(baseline_dir, filename)
+        if not os.path.isfile(old_path):
+            print("  skip {} (no {} or {})".format(style, LEGACY[style], filename))
             continue
         old = TTFont(old_path)
         old_cmap = old.getBestCmap()
@@ -301,6 +417,8 @@ def main():
     parser.add_argument("--dir", default=repo, help="directory holding the built faces")
     parser.add_argument("--baseline", help="directory holding the previously shipped faces")
     parser.add_argument("--csv", help="nerdfont.csv to check coverage against")
+    parser.add_argument("--manifests", default=os.path.join(here, ".work", "fill"),
+                        help="directory of the fill.py manifests (default: build/.work/fill)")
     args = parser.parse_args()
 
     built = {}
@@ -310,6 +428,11 @@ def main():
             fail("missing built face {}".format(filename))
             continue
         built[style] = check_face(path, style)
+        manifest = os.path.join(args.manifests, MANIFEST[style])
+        if os.path.isfile(manifest):
+            check_fill(built[style][0], built[style][1], built[style][2], style, manifest)
+        else:
+            print("\nFill stage: skip {} (no manifest at {})".format(style, os.path.relpath(manifest)))
 
     if args.csv and "Regular" in built:
         check_csv(built["Regular"][1], args.csv)

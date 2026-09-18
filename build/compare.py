@@ -16,7 +16,10 @@ The four claims it checks, one per section:
      reproduce upstream's own file exactly. Until that holds, nothing below it
      means anything, because a difference could be ours or could be theirs.
   1. vs the stock control -- our patch changes icon scale, box drawing and the
-     name table. Nothing else. Any other glyph that moved is a finding.
+     name table, and the fill stage appends exactly the codepoints its manifest
+     (build/.work/fill/<style>.json) records. Nothing else. Any other glyph that
+     moved, and any codepoint added that fill.py did not write down, is a
+     finding.
   2. vs the previously shipped faces -- coverage moves only in the direction the
      upstream release notes describe, and Latin text does not move at all.
   3. build determinism -- rebuilding produces the same glyphs, modulo the
@@ -26,6 +29,7 @@ Point 2 needs `--baseline DIR`; without it that section is skipped.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -51,6 +55,7 @@ LEGACY = {
     "Italic": "MesloLGS NF Italic.ttf",
     "BoldItalic": "MesloLGS NF Bold Italic.ttf",
 }
+MANIFEST = {s: "{}.json".format(s) for s in STYLES}
 
 # --- what our patch is allowed to touch ------------------------------------
 #
@@ -160,6 +165,16 @@ def section(title):
     print("\n{}\n{}".format(title, "-" * len(title)))
 
 
+def filled_codepoints(manifests, style):
+    """The codepoints fill.py recorded adding to this face, or None if it left
+    no manifest (an old build, or one run with the stage skipped)."""
+    path = os.path.join(manifests, MANIFEST[style])
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return {int(cp, 16) for cp in json.load(handle)["filled"]}
+
+
 # ---------------------------------------------------------------------------
 # 0. Control build vs upstream's published binary
 # ---------------------------------------------------------------------------
@@ -210,8 +225,8 @@ def compare_control_to_upstream(control_dir, upstream_dir):
 # 1. Shipped vs the stock control
 # ---------------------------------------------------------------------------
 
-def compare_to_control(repo, control_dir, source_dir):
-    section("1. Shipped vs stock control (only our patch should differ)")
+def compare_to_control(repo, control_dir, source_dir, manifests):
+    section("1. Shipped vs stock control (only our patch and the fill should differ)")
     for style in STYLES:
         ship_path = os.path.join(repo, SHIPPED[style])
         ctl_path = os.path.join(control_dir, CONTROL[style])
@@ -222,16 +237,47 @@ def compare_to_control(repo, control_dir, source_dir):
         ship = load(ship_path)
         ctl = load(ctl_path)
 
-        # Coverage must be untouched: our patch scales glyphs, it never adds or
-        # removes them. This is the check that catches a hunk landing somewhere
-        # that changes which glyph sets get copied.
-        added = sorted(set(ship[1]) - set(ctl[1]))
+        # Coverage: our patch scales glyphs, it never adds or removes them, so
+        # the only codepoints allowed to appear are the ones fill.py wrote into
+        # its manifest, and nothing may disappear. This is the check that
+        # catches a hunk landing somewhere that changes which glyph sets get
+        # copied, and a fill stage that filled something it did not record.
+        added = set(ship[1]) - set(ctl[1])
         removed = sorted(set(ctl[1]) - set(ship[1]))
-        if added or removed:
-            fail("{}: our patch changed coverage (+{} / -{}): {} {}".format(
-                style, len(added), len(removed), hexes(added), hexes(removed)))
+        expected = filled_codepoints(manifests, style)
+        if removed:
+            fail("{}: {} codepoint(s) lost against stock: {}".format(
+                style, len(removed), hexes(removed)))
+        if expected is None:
+            if added:
+                fail("{}: {} codepoint(s) added with no fill manifest to account for "
+                     "them (expected {}): {}".format(
+                         style, len(added), os.path.join(manifests, MANIFEST[style]),
+                         hexes(sorted(added))))
+            elif not removed:
+                ok("{}: identical coverage, {} codepoints (no fill manifest)".format(
+                    style, len(ship[1])))
         else:
-            ok("{}: identical coverage, {} codepoints".format(style, len(ship[1])))
+            unaccounted = sorted(added - expected)
+            unfilled = sorted(expected - added)
+            if unaccounted or unfilled:
+                fail("{}: coverage is not control + fill manifest (+{} unaccounted / "
+                     "-{} recorded but absent): {} {}".format(
+                         style, len(unaccounted), len(unfilled),
+                         hexes(unaccounted), hexes(unfilled)))
+            elif not removed:
+                ok("{}: coverage is stock plus the {} codepoints fill.py recorded".format(
+                    style, len(expected)))
+
+        # The fill stage may only append glyphs. If stock's glyph order is not
+        # a prefix of ours, something reordered or replaced a stock glyph.
+        ctl_order = ctl[0].getGlyphOrder()
+        ship_order = ship[0].getGlyphOrder()
+        if ship_order[:len(ctl_order)] != ctl_order:
+            fail("{}: stock glyph order is not a prefix of the shipped one".format(style))
+        else:
+            ok("{}: stock glyph order intact, {} glyphs appended".format(
+                style, len(ship_order) - len(ctl_order)))
 
         shared = sorted(set(ship[1]) & set(ctl[1]))
         differs = set(moved(ship, ctl, shared))
@@ -307,7 +353,7 @@ def compare_to_control(repo, control_dir, source_dir):
 # 2. Shipped vs what we shipped last time
 # ---------------------------------------------------------------------------
 
-def compare_to_baseline(repo, baseline):
+def compare_to_baseline(repo, baseline, manifests):
     section("2. Shipped vs previous release (coverage moves, text does not)")
     for style in STYLES:
         old_path = os.path.join(baseline, LEGACY[style])
@@ -328,6 +374,11 @@ def compare_to_baseline(repo, baseline):
         else:
             ok("{}: +{} / -{}, every loss a retired Material Design alias".format(
                 style, len(gained), len(lost)))
+        filled = filled_codepoints(manifests, style)
+        if filled is not None:
+            from_fill = len([c for c in gained if c in filled])
+            note("{}: {} of the {} gained codepoints came from the fill stage".format(
+                style, from_fill, len(gained)))
 
         text = moved(old, new, LATIN)
         if text:
@@ -401,6 +452,8 @@ def main():
     parser.add_argument("--upstream", nargs="?", const=os.path.join(
         here, ".work", "upstream-release"),
         help="upstream's published faces (./build/fetch-release.sh)")
+    parser.add_argument("--manifests", default=os.path.join(here, ".work", "fill"),
+                        help="fill.py manifests, one per face (default: build/.work/fill)")
     args = parser.parse_args()
 
     if args.upstream:
@@ -409,9 +462,9 @@ def main():
         section("0. Stock control vs upstream's published release")
         print("  skipped (run ./build/fetch-release.sh, then pass --upstream)")
 
-    compare_to_control(args.dir, args.control, args.source)
+    compare_to_control(args.dir, args.control, args.source, args.manifests)
     if args.baseline:
-        compare_to_baseline(args.dir, args.baseline)
+        compare_to_baseline(args.dir, args.baseline, args.manifests)
     else:
         section("2. Shipped vs previous release")
         print("  skipped (pass --baseline DIR)")
