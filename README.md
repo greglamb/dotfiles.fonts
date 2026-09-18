@@ -29,8 +29,8 @@ unchanged. What you will notice:
   back to another installed font now come from this one, in Noto's style: on
   macOS that means Noto's emoji rather than Apple's. Flags, and emoji newer
   than Unicode 16, still come from your system emoji font.
-- **Skin-tone and hair-style variants are left out** to keep the size down,
-  so 👍🏽 can show as 👍 followed by a colour swatch.
+- **Skin-tone and hair-style variants show as the default emoji**: 👍🏽 draws
+  as 👍 and 👩🏽‍💻 as 👩‍💻. They are left out to keep the size down.
 - **Emoji stay colour where Unicode says they are emoji** (🌈 ⏰ ✅), and
   text-style symbols stay monochrome (ℹ ⏸), one U+FE0F away from colour.
   Anything that looks wrong can be switched per character: see

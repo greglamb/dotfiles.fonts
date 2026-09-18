@@ -315,6 +315,26 @@ def ligatures_to(font, feature_tag):
     return out
 
 
+def ccmp_ligatures(font):
+    """(first glyph, other components, ligature glyph) for every ligature the
+    fill's feature reaches."""
+    gsub = font.get("GSUB")
+    if gsub is None:
+        return
+    table = gsub.table
+    indices = set()
+    for record in table.FeatureList.FeatureRecord:
+        if record.FeatureTag == fill.LIGATURE_FEATURE:
+            indices.update(record.Feature.LookupListIndex)
+    for index in sorted(indices):
+        for st in table.LookupList.Lookup[index].SubTable:
+            if st.LookupType != 4:
+                continue
+            for first, ligatures in st.ligatures.items():
+                for lig in ligatures:
+                    yield first, tuple(lig.Component), lig.LigGlyph
+
+
 def check_fill(font, cmap, glyphs, style, manifest_path):
     """The glyphs fill.py added: present, monospaced, inside their cells, and
     for emoji, painted in the format the manifest names; the sequences
@@ -508,6 +528,26 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
         else:
             ok("{} ZWJ sequences reachable through '{}' ({} ligature entries)".format(
                 len(sequences), fill.LIGATURE_FEATURE, total))
+    folded = summary.get("modifier_ligatures", 0)
+    if folded:
+        # Every ligature with a skin tone or hair component in it must land on
+        # its first component: the variant folds onto the emoji it varies.
+        marks = {cmap[cp] for lo, hi in fill.MODIFIER_RANGES for cp in range(lo, hi + 1)
+                 if cp in cmap}
+        found, wrong = 0, []
+        for first, components, lig in ccmp_ligatures(font):
+            if marks & set(components):
+                found += 1
+                if lig != first:
+                    wrong.append("{} -> {}".format(" ".join((first,) + components), lig))
+        if wrong:
+            fail("{} skin-tone/hair ligature(s) do not fold onto the base: {}".format(
+                len(wrong), "; ".join(wrong[:3])))
+        elif found != folded:
+            fail("'{}' has {} skin-tone/hair ligatures, manifest says {}".format(
+                fill.LIGATURE_FEATURE, found, folded))
+        else:
+            ok("{} skin-tone/hair ligatures fold onto the base emoji".format(found))
     uvs = manifest.get("variation_sequences", {})
     if uvs:
         table = next((t for t in font["cmap"].tables if t.format == 14), None)

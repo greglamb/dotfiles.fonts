@@ -40,7 +40,11 @@ that Unicode shows as emoji by default are filled in colour, with the two
 override files for exceptions and `emoji-data.txt` pinned beside the Noto
 sources; U+FE0F selectors cut to the 371 Unicode defines; the Docker build
 pinned to `linux/amd64`; and the ligature order made independent of the
-fontTools version.
+fontTools version. After that commit: skin-tone and hair variants fold onto
+the untoned emoji by ligature (👍🏽 draws 👍, no glyphs added), and the
+sequence ligatures accept the colour glyph HarfBuzz and CoreText substitute
+for `<cp> FE0F` before GSUB -- without it, 🏳️‍🌈 and ❤️‍🔥 came apart in
+every HarfBuzz shaper. Checked by shaping with HarfBuzz.
 
 ## Where it stands
 

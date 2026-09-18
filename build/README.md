@@ -128,10 +128,17 @@ too: 237 of them at Noto 2.051, under the `ccmp` feature, which shapers apply
 by default and terminals do not let users switch off. Every sequence with a
 skin tone (U+1F3FB–U+1F3FF) or hair component (U+1F9B0–U+1F9B3) is left out;
 they are three quarters of Noto's sequences and would multiply the glyph
-count. A sequence keeps its U+200D joiners, and U+FE0F is accepted after any
-component whose emoji presentation is opt-in, which is where the RGI
-sequences carry it, so both `1F3F3 FE0F 200D 1F308` and `1F3F3 200D 1F308`
-reach the flag. Skin-tone sequences and keycaps render as their parts.
+count. Instead they fold onto what is kept, through ligatures to glyphs the
+face already has: a skin tone after an emoji becomes that emoji (👍🏽 draws
+👍), a person followed by U+200D and a hair component becomes the person, and
+a toned ZWJ sequence becomes its untoned form (👩🏽‍💻 draws 👩‍💻). That is 677
+ligature entries, about 6 KB, and no glyph. A sequence keeps its U+200D
+joiners, and after any component whose emoji presentation is opt-in -- where
+the RGI sequences carry U+FE0F -- three spellings reach it: the plain glyph,
+the plain glyph and U+FE0F, and the colour glyph the format 14 cmap below
+maps the pair to, which is what HarfBuzz and CoreText hand GSUB once they have
+resolved the selector. So `1F3F3 FE0F 200D 1F308` and `1F3F3 200D 1F308` both
+reach the flag in every shaper. Keycaps render as their parts.
 
 U+FE0F on its own gets its meaning as well, through a format 14 cmap
 subtable: `<symbol> FE0F` selects the colour emoji wherever the plain glyph is

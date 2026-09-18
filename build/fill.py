@@ -40,7 +40,8 @@ their reasons and numbers.
 
 On top of the single codepoints, the emoji ZWJ sequences Noto Color Emoji
 draws are carried over as ligatures (family, profession and flag sequences,
-minus every variant with a skin tone or hair component), and the emoji
+minus every variant with a skin tone or hair component, which fold onto the
+untoned emoji instead, again by ligature and without a glyph), and the emoji
 presentation selector U+FE0F gets its meaning: `<symbol> FE0F` draws the
 colour emoji wherever the plain symbol is monochrome. That covers exactly the
 variation sequences Unicode defines, which every text-by-default emoji has, so
@@ -138,7 +139,9 @@ ZWJ = 0x200D
 VS16 = 0xFE0F
 # Sequences containing one of these are not carried over: they multiply the
 # glyph count several times over for variants terminals rarely see.
-MODIFIER_RANGES = ((0x1F3FB, 0x1F3FF), (0x1F9B0, 0x1F9B3))
+SKIN_TONES = (0x1F3FB, 0x1F3FF)
+HAIR = (0x1F9B0, 0x1F9B3)
+MODIFIER_RANGES = (SKIN_TONES, HAIR)
 # The GSUB feature the sequence ligatures go under. `ccmp` is what Noto uses,
 # and it is on by default in every shaper, unlike `liga` which terminals let
 # users switch off.
@@ -750,26 +753,29 @@ def empty_gsub():
     return table
 
 
-def add_ligatures(font, mapping, tag=LIGATURE_FEATURE):
-    """Append a ligature lookup for `mapping` ((component names) -> glyph) and
-    hang it off `tag` in every language system the font has."""
+def add_ligatures(font, mappings, tag=LIGATURE_FEATURE):
+    """Append one ligature lookup per mapping ((component names) -> glyph), in
+    order, and hang them off `tag` in every language system the font has. A
+    shaper runs a feature's lookups in that order, each over the whole run."""
     if "GSUB" not in font:
         font["GSUB"] = empty_gsub()
     gsub = font["GSUB"].table
 
-    lookup = ot.Lookup()
-    lookup.LookupType = 4
-    lookup.LookupFlag = 0
-    lookup.SubTable = [buildLigatureSubstSubtable(mapping)]
-    lookup.SubTableCount = 1
-    gsub.LookupList.Lookup.append(lookup)
-    gsub.LookupList.LookupCount = len(gsub.LookupList.Lookup)
-    lookup_index = gsub.LookupList.LookupCount - 1
+    indices = []
+    for mapping in mappings:
+        lookup = ot.Lookup()
+        lookup.LookupType = 4
+        lookup.LookupFlag = 0
+        lookup.SubTable = [buildLigatureSubstSubtable(mapping)]
+        lookup.SubTableCount = 1
+        gsub.LookupList.Lookup.append(lookup)
+        gsub.LookupList.LookupCount = len(gsub.LookupList.Lookup)
+        indices.append(gsub.LookupList.LookupCount - 1)
 
     feature = ot.Feature()
     feature.FeatureParams = None
-    feature.LookupListIndex = [lookup_index]
-    feature.LookupCount = 1
+    feature.LookupListIndex = indices
+    feature.LookupCount = len(indices)
     record = ot.FeatureRecord()
     record.FeatureTag = tag
     record.Feature = feature
@@ -790,7 +796,7 @@ def add_ligatures(font, mapping, tag=LIGATURE_FEATURE):
             langsys.FeatureCount = len(langsys.FeatureIndex)
             if langsys.ReqFeatureIndex != 0xFFFF and langsys.ReqFeatureIndex >= position:
                 langsys.ReqFeatureIndex += 1
-    return lookup_index
+    return indices
 
 
 def add_variation_sequences(font, entries):
@@ -849,6 +855,7 @@ class Filler(object):
         self.unfilled = []      # Segoe-covered gaps no source can fill
         self.overrides_mapped = []  # overridden codepoints the face already maps
         self.copyrights = []    # source copyright lines appended to name ID 0
+        self.modifier_ligatures = 0  # skin-tone and hair ligatures to the base
         self.skipped = {}       # reason -> [cp]
         self.blank = []         # source had the codepoint but no ink
 
@@ -993,11 +1000,43 @@ class Filler(object):
             sys.exit("fill.py: no format 12 cmap subtable for supplementary codepoints")
         if self.uvs:
             add_variation_sequences(self.font, self.uvs)
+        lookups = []
+        if self.want_sequences:
+            tones, hair = self.modifier_mappings()
+            self.modifier_ligatures = len(tones) + len(hair)
+            lookups += [m for m in (tones, hair) if m]
         if self.sequences:
             mapping = self.ligature_mapping(new_cmap)
             self.ligatures = len(mapping)
-            add_ligatures(self.font, mapping)
+            lookups.append(mapping)
+        if lookups:
+            add_ligatures(self.font, lookups)
         self.add_copyrights()
+
+    def modifier_mappings(self):
+        """Ligatures that fold the variants the fill leaves out back onto what
+        it keeps, without adding a glyph: a skin tone after an emoji becomes
+        that emoji's own glyph, and a person followed by U+200D and a hair
+        component becomes the person. Tones first, as a lookup of its own, so
+        that a toned person with hair loses both, and a toned ZWJ sequence
+        reaches the sequence ligatures as its untoned form. The pairs are the
+        ones Noto Color Emoji draws, so only what Unicode defines is folded."""
+        def glyph(cp):
+            return self.cmap.get(cp) or self.glue.get(cp)
+
+        def tone(cp):
+            return SKIN_TONES[0] <= cp <= SKIN_TONES[1]
+
+        tones, hair = {}, {}
+        for cps in sorted(self.sources.ligatures[EMOJI]):
+            for before, cp in zip(cps, cps[1:]):
+                if tone(cp) and before != ZWJ and glyph(before) and glyph(cp):
+                    tones[(glyph(before), glyph(cp))] = glyph(before)
+            bare = tuple(cp for cp in cps if not tone(cp))
+            if (len(bare) == 3 and bare[1] == ZWJ and HAIR[0] <= bare[2] <= HAIR[1]
+                    and all(glyph(cp) for cp in bare)):
+                hair[tuple(glyph(cp) for cp in bare)] = glyph(bare[0])
+        return tones, hair
 
     def add_copyrights(self):
         """Append the copyright line of every Noto font a glyph came from to
@@ -1044,20 +1083,27 @@ class Filler(object):
         return self.cmap.get(cp) or new_cmap[cp]
 
     def ligature_mapping(self, new_cmap):
-        """(component glyph names) -> sequence glyph, with U+FE0F allowed after
-        every component whose emoji presentation is opt-in -- that is where
-        the RGI sequences carry it, and what a shaper that does not skip
-        selectors will see."""
+        """(component glyph names) -> sequence glyph. After every component
+        whose emoji presentation is opt-in -- where the RGI sequences carry
+        U+FE0F -- three spellings are accepted: the plain glyph alone (a
+        shaper that dropped the selector, or none was typed), the plain glyph
+        and U+FE0F (a shaper that keeps it), and the colour glyph our format
+        14 cmap maps the pair to (HarfBuzz and CoreText resolve the selector
+        before GSUB, and drop it)."""
         mapping = {}
         for cps, entry in sorted(self.sequences.items()):
-            slots = [i for i, cp in enumerate(cps) if cp != ZWJ and cp in self.sources.presentation]
-            for choice in itertools.product((False, True), repeat=len(slots)):
-                names = []
-                for i, cp in enumerate(cps):
-                    names.append(self.glyph_for(cp, new_cmap))
-                    if i in slots and choice[slots.index(i)]:
-                        names.append(self.glue[VS16])
-                mapping[tuple(names)] = entry["glyph"]
+            options = []
+            for cp in cps:
+                plain = self.glyph_for(cp, new_cmap)
+                if cp != ZWJ and cp in self.sources.presentation:
+                    spellings = [(plain,), (plain, self.glue[VS16])]
+                    if self.uvs.get(cp):
+                        spellings.append((self.uvs[cp],))
+                    options.append(spellings)
+                else:
+                    options.append([(plain,)])
+            for combo in itertools.product(*options):
+                mapping[tuple(name for part in combo for name in part)] = entry["glyph"]
         # Longest first, then by name: the order fontTools 4.46 sorts into.
         # Newer fontTools sorts by length only and keeps insertion order for
         # the rest, so handing it this order makes both write the same GSUB.
@@ -1295,6 +1341,7 @@ class Filler(object):
                     e for e in self.filled.values() if e["override"] == "monochrome"]),
                 "sequences": len(self.sequences),
                 "ligatures": self.ligatures,
+                "modifier_ligatures": self.modifier_ligatures,
                 "presentation": len(self.presentation),
                 "variation_sequences": len(self.uvs),
                 "layer_glyphs": self.layer_glyphs,
