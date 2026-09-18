@@ -1,6 +1,6 @@
 cask "dotfiles-fonts" do
   version "2.1.0"
-  sha256 "7d291ea3cd320156aa63ee68626bff6b20df371f8e5e9d43525711d7da363e07"
+  sha256 "24b40a32d6a1c47b1eedede7fd07e01c6efaca694257a9253a029edc04e44021"
 
   url "https://github.com/greglamb/dotfiles.fonts/archive/refs/tags/v#{version}.tar.gz"
   name "MesloLGS NF DF"
