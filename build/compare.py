@@ -16,7 +16,8 @@ The four claims it checks, one per section:
      reproduce upstream's own file exactly. Until that holds, nothing below it
      means anything, because a difference could be ours or could be theirs.
   1. vs the stock control -- our patch changes icon scale, box drawing and the
-     name table, and the fill stage appends exactly the codepoints its manifest
+     name table (fill.py adds the source copyrights to name ID 0), and the fill
+     stage appends exactly the codepoints its manifest
      (build/.work/fill/<style>.json) records. Nothing else. Any other glyph that
      moved, and any codepoint added that fill.py did not write down, is a
      finding.
@@ -68,8 +69,10 @@ BLOCK_RANGE = range(0x2500, 0x25A0)
 # rule, which is "stock left it identical to the Meslo source", not "the Meslo
 # source has this codepoint".
 #
-# Name IDs rename.py rewrites, plus the ones it drops.
-NAME_IDS_CHANGED = {1, 2, 3, 4, 6, 16, 17, 18, 21, 22}
+# Name IDs rename.py rewrites (the names, and the license fields 13 and 14),
+# the ones it drops, and ID 0, the copyright, which fill.py appends the Noto
+# fonts' copyright lines to.
+NAME_IDS_CHANGED = {0, 1, 2, 3, 4, 6, 13, 14, 16, 17, 18, 21, 22}
 
 # Material Design aliases upstream retired in 3.4.0. Losing these is expected.
 RETIRED_MDI = range(0xF500, 0xFD47)
@@ -332,10 +335,10 @@ def compare_to_control(repo, control_dir, source_dir, manifests):
             if ship_names.get(key) != ctl_names.get(key) and key[0] not in NAME_IDS_CHANGED:
                 unexpected.add(key[0])
         if unexpected:
-            fail("{}: name IDs changed that rename.py should not touch: {}".format(
+            fail("{}: name IDs changed that rename.py and fill.py should not touch: {}".format(
                 style, sorted(unexpected)))
         else:
-            ok("{}: name table differs only in the IDs rename.py rewrites".format(style))
+            ok("{}: name table differs only in the IDs rename.py and fill.py write".format(style))
 
         # Metrics must be untouched: a changed line height reflows terminals.
         for table, attrs in (("hhea", ("ascent", "descent", "lineGap")),

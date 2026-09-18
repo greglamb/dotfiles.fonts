@@ -143,6 +143,11 @@ def check_face(path, style):
         if name_id in names:
             fail("typographic name ID {} survived: {!r}".format(name_id, names[name_id]))
 
+    if "Open Font License" in (names.get(13) or "") and names.get(14):
+        ok("license fields set (name IDs 13 and 14)")
+    else:
+        fail("license description or URL missing (name IDs 13, 14)")
+
     # Monospace: every glyph must share one advance width.
     hmtx = font["hmtx"]
     widths = set(hmtx[g][0] for g in font.getGlyphOrder() if hmtx[g][0] != 0)
@@ -328,6 +333,12 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
         summary["filled"],
         ", ".join("{} from {}".format(n, s) for s, n in sorted(summary["by_source"].items())),
         summary["unfilled_segoe"]))
+    copyright = [r.toUnicode() for r in font["name"].names if r.nameID == 0]
+    lines = manifest.get("copyrights", [])
+    if not lines or not copyright or any(line not in text for text in copyright for line in lines):
+        fail("name ID 0 lacks the copyright of the sources glyphs came from: {}".format(lines))
+    else:
+        ok("name ID 0 carries the {} source copyright line(s)".format(len(lines)))
 
     hmtx = font["hmtx"]
     cell = hmtx[cmap[0x41]][0]
@@ -395,16 +406,24 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
                 blank.append(hexcp)
             elif not inside(ink, entry["wide"]):
                 outside.append(hexcp)
-        # The rules fill.py is supposed to follow: a Segoe-covered gap is
-        # monochrome (from a symbol font, or from Noto Emoji only when the
-        # fall-through is on), and colour by default is for the rest.
+        # The rules fill.py is supposed to follow: an override decides first;
+        # then a Segoe-covered gap is colour if Unicode shows it as an emoji
+        # by default and monochrome otherwise (from a symbol font, or from
+        # Noto Emoji only when the fall-through is on); every other gap is
+        # colour.
         if fill.skip_reason(cp):
             broken.append(hexcp)
-        if entry["source"] in fill.MONO_SOURCES and not entry["segoe"]:
+        override = entry.get("override")
+        if override:
+            want_colour = override == "colour"
+        elif entry["segoe"]:
+            want_colour = entry.get("emoji_default", False)
+        else:
+            want_colour = True
+        if (entry["source"] == fill.EMOJI) != want_colour:
             broken.append(hexcp)
-        if entry["source"] == fill.EMOJI and entry["segoe"]:
-            broken.append(hexcp)
-        if entry["source"] == fill.EMOJI_MONO and not policy["emoji_fallthrough"]:
+        if (entry["source"] == fill.EMOJI_MONO and not policy["emoji_fallthrough"]
+                and override != "monochrome"):
             broken.append(hexcp)
 
     order = set(font.getGlyphOrder())
@@ -501,8 +520,8 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
             ok("{} U+FE0F variation sequences present ({} to an extra emoji glyph)".format(
                 len(uvs), len([g for g in uvs.values() if g])))
     if not broken:
-        ok("fill rules respected (Segoe-covered gaps monochrome, colour by default "
-           "only elsewhere, exclusions honoured)")
+        ok("fill rules respected (overrides first, Segoe-covered gaps monochrome unless "
+           "Unicode's emoji by default, colour elsewhere, exclusions honoured)")
 
 
 def check_csv(cmap, csv_path):

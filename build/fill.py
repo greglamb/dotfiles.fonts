@@ -5,13 +5,23 @@ Runs after font-patcher and rename.py, once per face:
 
     python3 build/fill.py SRC.ttf DST.ttf Regular --sources build/.work/sources
 
-A gap is a codepoint the face does not map. For every gap, in this order:
+A gap is a codepoint the face does not map. For every gap, first match wins:
 
-  1. Segoe UI Symbol maps it   -> the glyph from Noto Sans Symbols 2, else from
-                                  Noto Sans Symbols, else (see --no-emoji-fallthrough)
-                                  the monochrome one from Noto Emoji.
-  2. Noto Color Emoji maps it  -> the colour glyph from Noto Color Emoji.
-  3. Neither maps it           -> left as it is.
+  0. Never filled             -> controls, format characters, variation
+                                 selectors, Private Use, regional indicators
+                                 (see below).
+  1. Listed in an override    -> build/colour-overrides.txt: the colour glyph
+     file                        from Noto Color Emoji. build/monochrome-
+                                 overrides.txt: the monochrome glyph, from the
+                                 sources of rule 3 in order.
+  2. Segoe UI Symbol maps it, -> the colour glyph from Noto Color Emoji.
+     and Unicode shows it as
+     an emoji by default
+  3. Segoe UI Symbol maps it  -> the glyph from Noto Sans Symbols 2, else from
+                                 Noto Sans Symbols, else (see --no-emoji-fallthrough)
+                                 the monochrome one from Noto Emoji; else a gap.
+  4. Noto Color Emoji maps it -> the colour glyph from Noto Color Emoji.
+  5. Neither maps it          -> left as it is.
 
 Segoe UI Symbol is the reference for "this is a monochrome symbol, not an
 emoji": Windows draws everything it covers in monochrome, so we do too -- from
@@ -21,13 +31,20 @@ of them carry a license that lets us redistribute them. Segoe's character set
 is read from build/charsets/segoe-ui-symbol.txt (see charset.py) because the
 font itself cannot be checked in.
 
+Rule 2 carves out what Unicode itself treats as an emoji: Emoji_Presentation=Yes
+in emoji-data.txt (pinned by fetch-sources.sh), such as U+1F308 RAINBOW or
+U+23F0 ALARM CLOCK. Segoe covers several hundred of those, from the years
+Windows drew emoji in monochrome. The override files, kept by hand, settle
+single codepoints either way ahead of that. build/README.md has the rules with
+their reasons and numbers.
+
 On top of the single codepoints, the emoji ZWJ sequences Noto Color Emoji
 draws are carried over as ligatures (family, profession and flag sequences,
 minus every variant with a skin tone or hair component), and the emoji
 presentation selector U+FE0F gets its meaning: `<symbol> FE0F` draws the
-colour emoji wherever the plain symbol is monochrome, so the colour art is
-one selector away for every symbol the rule above keeps monochrome.
---no-sequences turns both off.
+colour emoji wherever the plain symbol is monochrome. That covers exactly the
+variation sequences Unicode defines, which every text-by-default emoji has, so
+its colour art is one selector away. --no-sequences turns both off.
 
 Emoji are embedded as COLRv0 layers by default, the one vector colour format
 that Windows Terminal, macOS CoreText, Chromium, FreeType and so every Linux
@@ -103,6 +120,8 @@ SOURCE_FILES = {
     EMOJI_MONO: {"Regular": "NotoEmoji[wght].ttf", "Bold": "NotoEmoji[wght].ttf"},
 }
 EMOJI_MONO_WEIGHT = {"Regular": 400, "Bold": 700}
+# Unicode's emoji properties, pinned next to the fonts by fetch-sources.sh.
+EMOJI_DATA = "emoji-data.txt"
 
 # Glyph name prefixes, so nothing can collide with what the patcher named.
 PREFIX = {SYMBOLS2: "sym2.", SYMBOLS: "sym1.", EMOJI: "nce.", EMOJI_MONO: "mono."}
@@ -582,6 +601,24 @@ def presentation_codepoints(font):
     return set()
 
 
+def load_emoji_property(path, prop):
+    """The codepoints Unicode's emoji-data.txt gives `prop`."""
+    out = set()
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            span, _, name = (part.strip() for part in line.partition(";"))
+            if name != prop:
+                continue
+            first, _, last = span.partition("..")
+            out.update(range(int(first, 16), int(last or first, 16) + 1))
+    if not out:
+        sys.exit("fill.py: {} lists no {} codepoints".format(path, prop))
+    return out
+
+
 class Sources(object):
     def __init__(self, directory, weight):
         self.directory = directory
@@ -607,9 +644,28 @@ class Sources(object):
         if colr.version != 1:
             sys.exit("fill.py: expected a COLRv1 emoji source, got version {}".format(colr.version))
         self.painted = {r.BaseGlyph for r in colr.table.BaseGlyphList.BaseGlyphPaintRecord}
+        path = os.path.join(directory, EMOJI_DATA)
+        if not os.path.isfile(path):
+            sys.exit("fill.py: missing {} (run build/fetch-sources.sh)".format(path))
+        self.emoji_presentation = load_emoji_property(path, "Emoji_Presentation")
 
     def upm(self, key):
         return self.fonts[key]["head"].unitsPerEm
+
+    def emoji_default(self, cp):
+        """Unicode shows it as an emoji by default (Emoji_Presentation=Yes)."""
+        return cp in self.emoji_presentation
+
+    def has_colour(self, cp):
+        """Noto Color Emoji draws it in colour."""
+        return self.cmaps[EMOJI].get(cp) in self.painted
+
+    def mono_source(self, cp):
+        """The first monochrome source that has it, in rule 2's order."""
+        for key in MONO_SOURCES:
+            if cp in self.cmaps[key]:
+                return key
+        return None
 
     def path(self, key):
         return os.path.join(self.directory, SOURCE_FILES[key][self.weight])
@@ -757,12 +813,14 @@ def add_variation_sequences(font, entries):
 # ---------------------------------------------------------------------------
 
 class Filler(object):
-    def __init__(self, font, style, sources, segoe, emoji_fallthrough, emoji_format,
-                 sequences, svg):
+    def __init__(self, font, style, sources, segoe, overrides, emoji_fallthrough,
+                 emoji_format, sequences, svg):
         self.font = font
         self.style = style
         self.sources = sources
         self.segoe = segoe
+        self.colour_overrides = overrides["colour"]
+        self.mono_overrides = overrides["monochrome"]
         self.emoji_fallthrough = emoji_fallthrough
         self.emoji_format = emoji_format
         self.want_sequences = sequences
@@ -789,6 +847,8 @@ class Filler(object):
         self.svg_glyphs = 0
         self.svg_documents = 0
         self.unfilled = []      # Segoe-covered gaps no source can fill
+        self.overrides_mapped = []  # overridden codepoints the face already maps
+        self.copyrights = []    # source copyright lines appended to name ID 0
         self.skipped = {}       # reason -> [cp]
         self.blank = []         # source had the codepoint but no ink
 
@@ -800,6 +860,10 @@ class Filler(object):
     def plan(self):
         """Decide the source for every gap. Returns [(cp, source_key)]."""
         candidates = set(self.segoe) | set(self.sources.cmaps[EMOJI])
+        # Before anything is filled: self.cmap is the font's own cmap dict,
+        # which run() adds to.
+        self.overrides_mapped = sorted(cp for cp in self.colour_overrides | self.mono_overrides
+                                       if cp in self.cmap)
         plan = []
         for cp in sorted(candidates):
             if cp in self.cmap:
@@ -808,7 +872,9 @@ class Filler(object):
             if why:
                 self.skipped.setdefault(why, []).append(cp)
                 continue
-            if cp in self.segoe:
+            if cp in self.mono_overrides:
+                plan.append((cp, self.sources.mono_source(cp)))
+            elif cp in self.segoe and not self.colour_by_rule1(cp):
                 if cp in self.sources.cmaps[SYMBOLS2]:
                     plan.append((cp, SYMBOLS2))
                 elif cp in self.sources.cmaps[SYMBOLS]:
@@ -821,6 +887,20 @@ class Filler(object):
                 plan.append((cp, EMOJI))
         return plan
 
+    def colour_by_rule1(self, cp):
+        """A Segoe-covered gap that is colour anyway: one Unicode shows as an
+        emoji by default and Noto Color Emoji draws, or one listed in
+        build/colour-overrides.txt."""
+        return (cp in self.colour_overrides
+                or (self.sources.emoji_default(cp) and self.sources.has_colour(cp)))
+
+    def override(self, cp):
+        if cp in self.colour_overrides:
+            return "colour"
+        if cp in self.mono_overrides:
+            return "monochrome"
+        return None
+
     def plan_sequences(self, mapped):
         """The ZWJ sequences to carry over: every component mapped (once the
         gaps are filled), nothing with a skin tone or hair component."""
@@ -832,13 +912,15 @@ class Filler(object):
                 out.append((cps, glyph))
         return out
 
-    def plan_presentation(self, mapped, emoji_cps, mono_cps):
-        """`<cp> FE0F` for every codepoint Noto lists as opt-in emoji, and for
-        every emoji the rule kept monochrome: the codepoint's own glyph if
-        that is already the colour emoji, else Noto Color Emoji's glyph as an
-        extra, reachable only through the selector."""
+    def plan_presentation(self, mapped, emoji_cps):
+        """`<cp> FE0F` for every codepoint Noto lists as opt-in emoji, which
+        is every variation sequence Unicode defines: the codepoint's own glyph
+        if that is already the colour emoji, else Noto Color Emoji's glyph as
+        an extra, reachable only through the selector. Nothing else gets one;
+        a selector Unicode does not define is dropped by the terminals that
+        check (Ghostty) and never typed by anyone else."""
         extras, defaults = [], []
-        for cp in sorted(self.sources.presentation | mono_cps):
+        for cp in sorted(self.sources.presentation):
             if cp not in mapped:
                 continue
             if cp in emoji_cps:
@@ -871,15 +953,17 @@ class Filler(object):
             new_cmap[cp] = name
             order.append(name)
             self.filled[cp] = {"source": key, "glyph": name, "wide": wide,
-                               "segoe": cp in self.segoe, "bounds": list(bounds)}
+                               "segoe": cp in self.segoe,
+                               "emoji_default": self.sources.emoji_default(cp),
+                               "override": self.override(cp),
+                               "bounds": list(bounds)}
 
         emoji_cps = [cp for cp, key in plan if key == EMOJI]
-        mono_cps = {cp for cp, key in plan if key == EMOJI_MONO and cp in new_cmap}
         mapped = set(self.cmap) | set(new_cmap) | set(emoji_cps)
         sequences, extras, defaults = [], [], []
         if self.want_sequences:
             sequences = self.plan_sequences(mapped)
-            extras, defaults = self.plan_presentation(mapped, set(emoji_cps), mono_cps)
+            extras, defaults = self.plan_presentation(mapped, set(emoji_cps))
         if emoji_cps or sequences or extras:
             self.add_emoji(emoji_cps, sequences, extras, order, new_glyphs, new_cmap)
         for cp in defaults:
@@ -913,6 +997,30 @@ class Filler(object):
             mapping = self.ligature_mapping(new_cmap)
             self.ligatures = len(mapping)
             add_ligatures(self.font, mapping)
+        self.add_copyrights()
+
+    def add_copyrights(self):
+        """Append the copyright line of every Noto font a glyph came from to
+        name ID 0, so each copy of the face carries it -- the OFL's condition 2
+        -- even where it is installed without the license files."""
+        used = {e["source"] for e in self.filled.values()} - {GLUE}
+        emoji = list(self.filled.values()) + list(self.sequences.values()) + \
+            list(self.presentation.values())
+        if any(e.get("mono") for e in emoji if e.get("source", EMOJI) == EMOJI):
+            used.add(EMOJI_MONO)  # the monochrome fallback outlines
+        lines = []
+        for key in (SYMBOLS2, SYMBOLS, EMOJI, EMOJI_MONO):
+            line = self.sources.fonts[key]["name"].getDebugName(0) if key in used else None
+            if line and line not in lines:
+                lines.append(line)
+        self.copyrights = lines
+        name = self.font["name"]
+        for record in [r for r in name.names if r.nameID == 0]:
+            text = record.toUnicode()
+            extra = [line for line in lines if line not in text]
+            if extra:
+                name.setName(" ".join([text] + extra), 0,
+                             record.platformID, record.platEncID, record.langID)
 
     def add_glue(self, order, new_glyphs, new_cmap):
         """U+200D and U+FE0F as empty zero-width glyphs, so a sequence stays
@@ -927,7 +1035,8 @@ class Filler(object):
             order.append(name)
             self.glue[cp] = name
             self.filled[cp] = {"source": GLUE, "glyph": name, "wide": False,
-                               "segoe": cp in self.segoe, "bounds": None}
+                               "segoe": cp in self.segoe, "emoji_default": False,
+                               "override": None, "bounds": None}
 
     def glyph_for(self, cp, new_cmap):
         if cp in self.glue:
@@ -949,7 +1058,10 @@ class Filler(object):
                     if i in slots and choice[slots.index(i)]:
                         names.append(self.glue[VS16])
                 mapping[tuple(names)] = entry["glyph"]
-        return mapping
+        # Longest first, then by name: the order fontTools 4.46 sorts into.
+        # Newer fontTools sorts by length only and keeps insertion order for
+        # the rest, so handing it this order makes both write the same GSUB.
+        return dict(sorted(mapping.items(), key=lambda item: (-len(item[0]), item[0])))
 
     def add_emoji(self, codepoints, sequences, extras, order, new_glyphs, new_cmap):
         key = EMOJI
@@ -1085,7 +1197,9 @@ class Filler(object):
             entries[old] = entry
             if kind == "base":
                 new_cmap[what] = name
-                entry.update({"source": key, "segoe": what in self.segoe})
+                entry.update({"source": key, "segoe": what in self.segoe,
+                              "emoji_default": self.sources.emoji_default(what),
+                              "override": self.override(what)})
                 self.filled[what] = entry
             elif kind == "sequence":
                 self.sequences[what] = entry
@@ -1165,11 +1279,20 @@ class Filler(object):
                        "sequences": self.want_sequences,
                        "svg": self.want_svg},
             "sources": self.sources.versions,
+            "copyrights": self.copyrights,
             "summary": {
                 "filled": len(self.filled),
                 "by_source": by_source,
                 "segoe_fallthrough_to_mono_emoji": len([
                     e for e in self.filled.values() if e["source"] == EMOJI_MONO]),
+                "segoe_emoji_default_in_colour": len([
+                    e for e in self.filled.values()
+                    if e["source"] == EMOJI and e["segoe"] and e["emoji_default"]
+                    and not e["override"]]),
+                "colour_by_override": len([
+                    e for e in self.filled.values() if e["override"] == "colour"]),
+                "monochrome_by_override": len([
+                    e for e in self.filled.values() if e["override"] == "monochrome"]),
                 "sequences": len(self.sequences),
                 "ligatures": self.ligatures,
                 "presentation": len(self.presentation),
@@ -1187,6 +1310,7 @@ class Filler(object):
             "variation_sequences": {"{:04X}".format(cp): name for cp, name in sorted(self.uvs.items())},
             "glue": {"{:04X}".format(cp): name for cp, name in sorted(self.glue.items())},
             "unfilled_segoe": ["{:04X}".format(cp) for cp in self.unfilled],
+            "overrides_not_gaps": ["{:04X}".format(cp) for cp in self.overrides_mapped],
             "blank_in_source": ["{:04X}".format(cp) for cp in self.blank],
             "skipped": {why: ["{:04X}".format(cp) for cp in cps]
                         for why, cps in sorted(self.skipped.items())},
@@ -1196,10 +1320,17 @@ class Filler(object):
         m = self.manifest()["summary"]
         parts = ["{} {}".format(m["by_source"].get(k, 0), k)
                  for k in (SYMBOLS2, SYMBOLS, EMOJI_MONO, EMOJI)]
-        return ("{}: +{} codepoints ({}), {} ZWJ sequences, {} presentation selectors; "
-                "{} Segoe-covered gaps left unfilled; {} skipped".format(
-                    self.style, m["filled"], ", ".join(parts), m["sequences"],
-                    m["variation_sequences"], m["unfilled_segoe"], sum(m["skipped"].values())))
+        not_gaps = len(self.overrides_mapped)
+        return ("{}: +{} codepoints ({}; {} Segoe-covered emoji in colour by default, "
+                "overrides {} colour / {} monochrome{}), {} ZWJ sequences, "
+                "{} presentation selectors; {} Segoe-covered gaps left unfilled; "
+                "{} skipped".format(
+                    self.style, m["filled"], ", ".join(parts),
+                    m["segoe_emoji_default_in_colour"], m["colour_by_override"],
+                    m["monochrome_by_override"],
+                    ", {} already mapped".format(not_gaps) if not_gaps else "",
+                    m["sequences"], m["variation_sequences"], m["unfilled_segoe"],
+                    sum(m["skipped"].values())))
 
 
 def main():
@@ -1213,6 +1344,13 @@ def main():
                         help="directory with the Noto source fonts (build/fetch-sources.sh)")
     parser.add_argument("--charset", default=os.path.join(here, "charsets", "segoe-ui-symbol.txt"),
                         help="Segoe UI Symbol character set (build/charset.py)")
+    parser.add_argument("--colour-overrides", default=os.path.join(here, "colour-overrides.txt"),
+                        help="codepoints to fill in colour whatever the rules say "
+                             "(default: %(default)s)")
+    parser.add_argument("--monochrome-overrides",
+                        default=os.path.join(here, "monochrome-overrides.txt"),
+                        help="codepoints to fill in monochrome whatever the rules say "
+                             "(default: %(default)s)")
     parser.add_argument("--manifest", help="write a JSON record of what was filled here")
     parser.add_argument("--emoji-format", choices=EMOJI_FORMATS, default=DEFAULT_EMOJI_FORMAT,
                         help="colour format for the emoji (default: %(default)s)")
@@ -1232,9 +1370,24 @@ def main():
     weight = "Bold" if args.style in ("Bold", "BoldItalic") else "Regular"
 
     segoe = charset.load(args.charset)
+    overrides = {"colour": charset.load(args.colour_overrides),
+                 "monochrome": charset.load(args.monochrome_overrides)}
     sources = Sources(args.sources, weight)
+
+    def check(path, cps, why):
+        if cps:
+            sys.exit("fill.py: {}: {} for {}".format(
+                path, why, ", ".join("U+{:04X}".format(cp) for cp in sorted(cps))))
+    both = overrides["colour"] & overrides["monochrome"]
+    check(args.monochrome_overrides, both, "also listed in {}".format(args.colour_overrides))
+    check(args.colour_overrides, {cp for cp in overrides["colour"]
+                                  if skip_reason(cp) or not sources.has_colour(cp)},
+          "Noto Color Emoji has no colour glyph")
+    check(args.monochrome_overrides, {cp for cp in overrides["monochrome"]
+                                      if skip_reason(cp) or not sources.mono_source(cp)},
+          "no monochrome source has a glyph")
     font = TTFont(args.source)
-    filler = Filler(font, args.style, sources, segoe, not args.no_emoji_fallthrough,
+    filler = Filler(font, args.style, sources, segoe, overrides, not args.no_emoji_fallthrough,
                     args.emoji_format, not args.no_sequences, not args.no_svg)
     filler.run()
     font.save(args.dest)

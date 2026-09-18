@@ -1,0 +1,102 @@
+The icon, powerline and braille glyphs in the MesloLGS NF DF faces are put
+there by the Nerd Fonts font-patcher (https://github.com/ryanoasis/nerd-fonts,
+v3.5.1, run with --complete). They come from the glyph sets below, each under
+its own license, as listed in Nerd Fonts' src/glyphs/README.md and in the
+license files that ship with each set. The license of the faces as a whole is
+in "MesloLGS NF DF License.txt".
+
+-----------------------------------------------------------------------------
+Glyph sets
+-----------------------------------------------------------------------------
+
+Codicons 0.0.45 (https://github.com/microsoft/vscode-codicons)
+  Copyright (c) Microsoft Corporation
+  Creative Commons Attribution 4.0 International (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+
+Devicons 2.17.0 (https://github.com/devicons/devicon)
+  Copyright (c) 2015 konpa
+  MIT License (text below)
+
+Extra glyphs from Hack (https://github.com/source-foundry/Hack)
+  Copyright (c) 2018 Source Foundry Authors
+  MIT License (text below)
+
+Font Awesome Free 6.5.1 (https://github.com/FortAwesome/Font-Awesome)
+  Copyright (c) 2022 Fonticons, Inc. (https://fontawesome.com)
+  with Reserved Font Name "Font Awesome".
+  The glyphs are taken from the Font Awesome Free desktop font, which is
+  licensed under the SIL Open Font License, Version 1.1 (text in
+  "Noto License.txt"); the icon designs are licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). Full terms:
+  https://fontawesome.com/license/free
+
+Font Awesome Extension 0.0.3 (https://github.com/AndreLZGava/font-awesome-extension)
+  By AndreLZGava
+  MIT License, as recorded by Nerd Fonts (text below)
+
+Font Logos 1.3.0 (https://github.com/lukas-w/font-logos)
+  Released into the public domain (The Unlicense, https://unlicense.org)
+
+Material Design Icons, October 2022 (https://github.com/Templarian/MaterialDesign-Font)
+  By the Pictogrammers icon group (https://pictogrammers.com), released under
+  the Pictogrammers Free License, which puts the desktop and web fonts under
+  the Apache License, Version 2.0
+  https://www.apache.org/licenses/LICENSE-2.0
+
+Octicons 18.3.0 (https://github.com/primer/octicons)
+  Copyright (c) 2023 GitHub Inc.
+  MIT License (text below)
+
+Pomicons 1.001 (https://github.com/gabrielelana/pomicons)
+  Copyright (c) 2021, Gabriele Lana gabriele.lana@gmail.com
+  with Reserved Font Name Pomicons.
+  SIL Open Font License, Version 1.1 (text in "Noto License.txt")
+
+Powerline Extra Symbols 1.200 (https://github.com/ryanoasis/powerline-extra-symbols)
+  Copyright (c) 2016 Ryan L McIntyre
+  MIT License (text below)
+
+Powerline Symbols (https://github.com/powerline/powerline)
+  Copyright 2013 Kim Silkebækken and other contributors
+  MIT License (text below)
+
+IEC Power Symbols (https://github.com/jloughry/Unicode)
+  By Joe Loughry
+  MIT License, as recorded by Nerd Fonts (text below)
+
+Seti UI 0.8.1 (https://github.com/jesseweed/seti-ui) and Nerd Fonts' original
+icons
+  Copyright (c) 2014 Jesse Weed
+  Copyright (c) 2014 Ryan L McIntyre
+  MIT License (text below)
+
+Weather Icons 2.0.10 (https://github.com/erikflowers/weather-icons)
+  By Erik Flowers
+  SIL Open Font License, Version 1.1 (text in "Noto License.txt")
+
+Braille patterns and the other glyphs font-patcher draws itself
+  Copyright (c) 2014 Ryan L McIntyre
+  MIT License (text below)
+
+-----------------------------------------------------------------------------
+MIT License
+-----------------------------------------------------------------------------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

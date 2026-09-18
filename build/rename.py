@@ -35,6 +35,17 @@ NAME_UNIQUE = 3
 NAME_FULL = 4
 NAME_VERSION = 5
 NAME_PS = 6
+NAME_LICENSE = 13
+NAME_LICENSE_URL = 14
+
+# What the faces are distributed under; "MesloLGS NF DF License.txt" says why
+# and has the parts' own notices. The OFL asks for its text or a pointer to it
+# with every copy, and a font installed from the Scoop bucket arrives alone.
+LICENSE = ("This Font Software is licensed under the SIL Open Font License, "
+           "Version 1.1. Its Meslo LG glyphs are also available under the Apache "
+           "License, Version 2.0, and its Nerd Fonts glyph sets under their own "
+           "licenses. Notices and full texts: https://github.com/greglamb/dotfiles.fonts")
+LICENSE_URL = "https://openfontlicense.org"
 # Typographic family/subfamily and the WWS pair. A RIBBI family does not need
 # them, and leaving upstream's values behind would make the font report two
 # different families depending on which name the consumer reads.
@@ -58,6 +69,8 @@ def rename(src, dst, style_key):
         NAME_UNIQUE: "{}; {}".format(full, version) if version else full,
         NAME_FULL: full,
         NAME_PS: "{}-{}".format(PS_FAMILY, ps_style),
+        NAME_LICENSE: LICENSE,
+        NAME_LICENSE_URL: LICENSE_URL,
     }
 
     # Keep every (platform, encoding, language) the font already advertises so

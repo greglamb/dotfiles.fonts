@@ -1,3 +1,20 @@
+MesloLGS NF DF is Meslo LG S, patched by Nerd Fonts, with gaps filled from the
+Noto fonts. It is distributed as a whole under the SIL Open Font License,
+Version 1.1 (full text in "Noto License.txt"). It contains glyphs copied from
+fonts under that license -- the Noto fonts, and the Font Awesome, Pomicons and
+Weather Icons sets Nerd Fonts patches in -- and the OFL requires a font built
+with such glyphs to be distributed under it (OFL condition 5, OFL FAQ 3.2).
+
+Each part keeps its own copyright and license as well:
+
+  Meslo LG S: the Latin text, the metrics      Apache License 2.0 (below)
+  Nerd Fonts: icons, powerline, braille        "Nerd Fonts License.txt"
+  Noto: symbols and emoji the fill adds        SIL OFL 1.1, "Noto License.txt"
+
+-----------------------------------------------------------------------------
+Meslo LG (https://github.com/andreberg/Meslo-Font)
+-----------------------------------------------------------------------------
+
 Copyright 2009, 2010, 2013 André Berg
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,3 +28,11 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Meslo LG is a customized version of Apple's Menlo, itself a customized
+Bitstream Vera Sans Mono. The source faces carry this copyright notice, which
+the MesloLGS NF DF faces keep:
+
+  Copyright © 2009 Apple Inc. Copyright © 2006 by Tavmjong Bah.
+  Copyright © 2003 by Bitstream, Inc. All Rights Reserved.
+  Menlo is a Trademark of Apple Inc.

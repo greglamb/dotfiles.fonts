@@ -16,6 +16,12 @@ set -euo pipefail
 #
 # The cask's url and font paths both interpolate #{version}, so only the sha256
 # needs rewriting here.
+#
+# The Scoop manifest is different: it downloads the fonts and the license files
+# from main, not from the tag, and pins their hashes. So from the moment new
+# faces reach main until the commit from step 4 lands, `scoop install` fails on
+# a hash mismatch. When a release changes the faces, keep that window short:
+# run this and push the hash commit straight after the merge.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCOOP_MANIFEST="$SCRIPT_DIR/bucket/dotfiles-fonts.json"
@@ -40,33 +46,46 @@ sed_i() {
     fi
 }
 
-# Font files in same order as manifest URLs
+# Font files, as the cask declares them
 FONTS=(
     "MesloLGS NF DF Regular.ttf"
     "MesloLGS NF DF Bold.ttf"
     "MesloLGS NF DF Italic.ttf"
     "MesloLGS NF DF Bold Italic.ttf"
 )
+# License files Scoop downloads next to the fonts, so an install carries them
+LICENSES=(
+    "MesloLGS NF DF License.txt"
+    "Nerd Fonts License.txt"
+    "Noto License.txt"
+)
+# Everything the Scoop manifest downloads, in the order of its url list
+SCOOP_FILES=("${FONTS[@]}" "${LICENSES[@]}")
 
-# Generate per-font hashes (used by Scoop)
+# The manifest's url list must name the same files in the same order, or the
+# hashes below would land against the wrong downloads.
+URL_FILES=$(jq -r '.url[] | sub(".*#/"; "")' "$SCOOP_MANIFEST")
+if [[ "$URL_FILES" != "$(printf '%s\n' "${SCOOP_FILES[@]}")" ]]; then
+    echo "Error: $SCOOP_MANIFEST url list does not match SCOOP_FILES in this script:" >&2
+    echo "$URL_FILES" >&2
+    exit 1
+fi
+
+# Generate per-file hashes (used by Scoop)
 HASHES=()
-for font in "${FONTS[@]}"; do
-    if [[ ! -f "$SCRIPT_DIR/$font" ]]; then
-        echo "Error: Font file not found: $font" >&2
+for file in "${SCOOP_FILES[@]}"; do
+    if [[ ! -f "$SCRIPT_DIR/$file" ]]; then
+        echo "Error: file not found: $file" >&2
         exit 1
     fi
-    hash=$(sha256 "$SCRIPT_DIR/$font")
+    hash=$(sha256 "$SCRIPT_DIR/$file")
     HASHES+=("$hash")
-    echo "$font: $hash"
+    echo "$file: $hash"
 done
 
 # Update Scoop manifest using jq
-jq --arg h0 "${HASHES[0]}" \
-   --arg h1 "${HASHES[1]}" \
-   --arg h2 "${HASHES[2]}" \
-   --arg h3 "${HASHES[3]}" \
-   '.hash = [$h0, $h1, $h2, $h3]' \
-   "$SCOOP_MANIFEST" > "$SCOOP_MANIFEST.tmp" && mv "$SCOOP_MANIFEST.tmp" "$SCOOP_MANIFEST"
+jq '.hash = $ARGS.positional' "$SCOOP_MANIFEST" --args "${HASHES[@]}" \
+    > "$SCOOP_MANIFEST.tmp" && mv "$SCOOP_MANIFEST.tmp" "$SCOOP_MANIFEST"
 
 echo ""
 echo "Updated $SCOOP_MANIFEST"

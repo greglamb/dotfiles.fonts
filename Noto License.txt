@@ -1,8 +1,8 @@
 The symbols and emoji that build/fill.py adds to the MesloLGS NF DF faces are
 copied from the fonts below. Each is licensed under the SIL Open Font License,
-Version 1.1, reproduced after the copyright notices. "Noto" is a Reserved Font
-Name under that license; this family is not named Noto and does not claim to
-be a Noto font.
+Version 1.1, reproduced after the copyright notices. None of them declares a
+Reserved Font Name. "Noto" is a trademark of Google LLC; this family is not
+named Noto and does not claim to be a Noto font.
 
   Noto Sans Symbols, Noto Sans Symbols 2 (https://github.com/notofonts/symbols)
     Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)
@@ -13,8 +13,9 @@ be a Noto font.
   Noto Emoji (https://fonts.google.com/noto/specimen/Noto+Emoji)
     Copyright 2013 Google LLC
 
-The Meslo LG S source faces and the Nerd Fonts glyph sets are covered by
-"MesloLGS NF DF License.txt".
+This is also the OFL text the faces as a whole are distributed under; see
+"MesloLGS NF DF License.txt" for that, for Meslo LG S's Apache License, and
+"Nerd Fonts License.txt" for the icon glyph sets.
 
 -----------------------------------------------------------------------------
 

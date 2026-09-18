@@ -43,6 +43,11 @@ NF_REPO="https://github.com/ryanoasis/nerd-fonts.git"
 # Docker image used for the containerised build. Needs fontforge with Python
 # bindings; Ubuntu 24.04 ships 20230101, which font-patcher accepts.
 DF_IMAGE="${DF_IMAGE:-ubuntu:24.04}"
+# fontforge's arm64 build draws ~300 Nerd Font icons differently from the
+# amd64 one upstream releases with (other point counts, other start points),
+# so the build runs as amd64 everywhere -- emulated on Apple Silicon, about
+# four minutes -- and compare.py section 0 can hold on any machine.
+DF_PLATFORM="${DF_PLATFORM:-linux/amd64}"
 
 # Source face -> RIBBI style token understood by rename.py.
 STYLES="Regular Bold Italic BoldItalic"
@@ -264,10 +269,11 @@ fill_faces() {
 }
 
 build_docker() {
-    echo "==> Building in $DF_IMAGE"
+    echo "==> Building in $DF_IMAGE ($DF_PLATFORM)"
     # Mount the whole repo so the script sees the same layout it does natively:
     # /df/build/build.sh writing its output to /df.
     docker run --rm \
+        --platform "$DF_PLATFORM" \
         -v "$REPO_DIR":/df \
         -e DF_NATIVE=1 \
         -e DF_STOCK="$DF_STOCK" \

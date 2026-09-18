@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Download the Noto fonts that build/fill.py copies glyphs from, pinned by
-# version and sha256, into build/.work/sources.
+# Download the Noto fonts that build/fill.py copies glyphs from, and the
+# Unicode emoji data its rules read, pinned by version and sha256, into
+# build/.work/sources.
 #
 #   ./build/fetch-sources.sh
 #
@@ -17,9 +18,13 @@ set -euo pipefail
 # Emoji is the monochrome variable font from google/fonts, both fetched from
 # the repository at a pinned commit because those releases carry no assets.
 #
-# Every file is licensed under the SIL Open Font License 1.1; the notice we
+# Every font is licensed under the SIL Open Font License 1.1; the notice we
 # ship with the built faces is "Noto License.txt" in the repository root.
 # Bumping a pin means checking that notice still names the right copyright.
+#
+# emoji-data.txt is Unicode's, for the Emoji_Presentation property ("shown as
+# an emoji by default"), at the Unicode version the Noto Color Emoji pin
+# draws. It is only read at build time; nothing from it ships in the faces.
 #
 # To upgrade: change the version, download once, paste in the new sha256.
 
@@ -37,6 +42,10 @@ COLOR_EMOJI_SHA256="0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a
 MONO_EMOJI_COMMIT="a54f7446f84a1125ef6bf08baa46f3639e8905e0"
 MONO_EMOJI_SHA256="de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551"
 
+# Emoji 16.0, what Noto Color Emoji 2.051 covers
+EMOJI_DATA_VERSION="16.0.0"
+EMOJI_DATA_SHA256="f1365a5173eee18e1f98b240cdc492e84a25f1ce7e0c9d1094eb29c41a22696a"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$SCRIPT_DIR/.work"
 DEST="$WORK_DIR/sources"
@@ -49,9 +58,10 @@ WANT=(
     "NotoSansSymbols2-Regular.ttf"
     "Noto-COLRv1.ttf"
     "NotoEmoji[wght].ttf"
+    "emoji-data.txt"
 )
 
-PINS="symbols=$SYMBOLS_VERSION symbols2=$SYMBOLS2_VERSION color-emoji=$COLOR_EMOJI_COMMIT mono-emoji=$MONO_EMOJI_COMMIT"
+PINS="symbols=$SYMBOLS_VERSION symbols2=$SYMBOLS2_VERSION color-emoji=$COLOR_EMOJI_COMMIT mono-emoji=$MONO_EMOJI_COMMIT emoji-data=$EMOJI_DATA_VERSION"
 
 sha256() {
     if command -v shasum >/dev/null 2>&1; then
@@ -112,6 +122,9 @@ fetch "https://raw.githubusercontent.com/googlefonts/noto-emoji/${COLOR_EMOJI_CO
 fetch "https://raw.githubusercontent.com/google/fonts/${MONO_EMOJI_COMMIT}/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
     "$DEST/NotoEmoji[wght].ttf" "$MONO_EMOJI_SHA256"
 
+fetch "https://www.unicode.org/Public/${EMOJI_DATA_VERSION}/ucd/emoji/emoji-data.txt" \
+    "$DEST/emoji-data.txt" "$EMOJI_DATA_SHA256"
+
 for face in "${WANT[@]}"; do
     if [[ ! -f "$DEST/$face" ]]; then
         echo "error: $face did not arrive" >&2
@@ -120,4 +133,4 @@ for face in "${WANT[@]}"; do
 done
 
 printf '%s\n' "$PINS" > "$STAMP"
-echo "==> ${#WANT[@]} source faces in $DEST"
+echo "==> ${#WANT[@]} source files in $DEST"
