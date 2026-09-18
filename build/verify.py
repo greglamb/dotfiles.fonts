@@ -20,8 +20,10 @@ Exits non-zero if any check fails.
 """
 
 import argparse
+import gzip
 import json
 import os
+import re
 import sys
 
 try:
@@ -393,12 +395,16 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
                 blank.append(hexcp)
             elif not inside(ink, entry["wide"]):
                 outside.append(hexcp)
-        # The rules fill.py is supposed to follow.
+        # The rules fill.py is supposed to follow: a Segoe-covered gap is
+        # monochrome (from a symbol font, or from Noto Emoji only when the
+        # fall-through is on), and colour by default is for the rest.
         if fill.skip_reason(cp):
             broken.append(hexcp)
-        if entry["source"] != fill.EMOJI and not entry["segoe"]:
+        if entry["source"] in fill.MONO_SOURCES and not entry["segoe"]:
             broken.append(hexcp)
-        if entry["source"] == fill.EMOJI and entry["segoe"] and not policy["emoji_fallthrough"]:
+        if entry["source"] == fill.EMOJI and entry["segoe"]:
+            broken.append(hexcp)
+        if entry["source"] == fill.EMOJI_MONO and not policy["emoji_fallthrough"]:
             broken.append(hexcp)
 
     order = set(font.getGlyphOrder())
@@ -444,6 +450,30 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
     elif "COLR" in font:
         fail("no emoji were filled but the face has a COLR table")
 
+    if policy.get("svg"):
+        painted = v0 if need_v0 else v1
+        expected = {font.getGlyphID(name) for name in painted}
+        have = set()
+        documents = font["SVG "].docList if "SVG " in font else []
+        for doc in documents:
+            data = doc.data
+            if isinstance(data, bytes):
+                data = (gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data).decode("utf-8")
+            ids = {int(m) for m in re.findall(r'id="glyph(\d+)"', data)}
+            if not ids or min(ids) < doc.startGlyphID or max(ids) > doc.endGlyphID:
+                fail("an SVG document's glyph ids fall outside its declared range")
+            have |= ids
+        if "SVG " not in font:
+            fail("manifest says the SVG table was written but there is none")
+        elif have != expected:
+            fail("SVG table covers {} glyphs, the colour glyphs are {} ({} not in it)".format(
+                len(have), len(expected), len(expected - have)))
+        else:
+            ok("SVG table covers the same {} glyphs in {} documents".format(
+                len(have), len(documents)))
+    elif "SVG " in font:
+        fail("the face has an SVG table the manifest does not account for")
+
     sequences = manifest.get("sequences", {})
     if sequences:
         reachable = ligatures_to(font, fill.LIGATURE_FEATURE)
@@ -471,7 +501,8 @@ def check_fill(font, cmap, glyphs, style, manifest_path):
             ok("{} U+FE0F variation sequences present ({} to an extra emoji glyph)".format(
                 len(uvs), len([g for g in uvs.values() if g])))
     if not broken:
-        ok("fill rules respected (Segoe-covered gaps monochrome, exclusions honoured)")
+        ok("fill rules respected (Segoe-covered gaps monochrome, colour by default "
+           "only elsewhere, exclusions honoured)")
 
 
 def check_csv(cmap, csv_path):

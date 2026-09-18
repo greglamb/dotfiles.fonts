@@ -9,28 +9,35 @@ A gap is a codepoint the face does not map. For every gap, in this order:
 
   1. Segoe UI Symbol maps it   -> the glyph from Noto Sans Symbols 2, else from
                                   Noto Sans Symbols, else (see --no-emoji-fallthrough)
-                                  from Noto Color Emoji.
-  2. Noto Color Emoji maps it  -> the glyph from Noto Color Emoji.
+                                  the monochrome one from Noto Emoji.
+  2. Noto Color Emoji maps it  -> the colour glyph from Noto Color Emoji.
   3. Neither maps it           -> left as it is.
 
 Segoe UI Symbol is the reference for "this is a monochrome symbol, not an
-emoji": Windows draws everything it covers in monochrome, so we do too, from
-the Noto symbol fonts, whose license lets us redistribute them. Its character
-set is read from build/charsets/segoe-ui-symbol.txt (see charset.py) because
-the font itself cannot be checked in.
+emoji": Windows draws everything it covers in monochrome, so we do too -- from
+the Noto symbol fonts, or from Noto Emoji, the monochrome sister of Noto Color
+Emoji, for the emoji-presentation characters the symbol fonts leave out. All
+of them carry a license that lets us redistribute them. Segoe's character set
+is read from build/charsets/segoe-ui-symbol.txt (see charset.py) because the
+font itself cannot be checked in.
 
 On top of the single codepoints, the emoji ZWJ sequences Noto Color Emoji
 draws are carried over as ligatures (family, profession and flag sequences,
 minus every variant with a skin tone or hair component), and the emoji
-presentation selector U+FE0F gets its meaning: `<symbol> FE0F` draws the emoji
-where the plain symbol is monochrome. --no-sequences turns both off.
+presentation selector U+FE0F gets its meaning: `<symbol> FE0F` draws the
+colour emoji wherever the plain symbol is monochrome, so the colour art is
+one selector away for every symbol the rule above keeps monochrome.
+--no-sequences turns both off.
 
 Emoji are embedded as COLRv0 layers by default, the one vector colour format
-that Windows Terminal, macOS CoreText, Chromium and most Linux terminals all
-draw. Every emoji glyph also carries a monochrome outline from Noto Emoji, so
-a renderer with no colour support at all still shows something.
---emoji-format colrv1 embeds Noto's COLRv1 paint graphs instead (gradients,
-but Chromium/GTK/kitty-on-Linux only), and `both` ships the two side by side.
+that Windows Terminal, macOS CoreText, Chromium, FreeType and so every Linux
+terminal all draw, and again as an OpenType SVG table carrying the same flat
+layers, for the CoreText apps that only look for `sbix` or `SVG` when deciding
+a glyph is colour (Ghostty). Every emoji glyph also carries a monochrome
+outline from Noto Emoji, so a renderer with no colour support at all still
+shows something. --emoji-format colrv1 embeds Noto's COLRv1 paint graphs
+instead (gradients, but Chromium/GTK/kitty-on-Linux only), `both` ships the
+two side by side, and --no-svg drops the SVG table.
 
 What is never filled, whatever the sources map: control, format and variation
 selector codepoints, Private Use, and the regional indicator letters -- those
@@ -45,6 +52,7 @@ writes a manifest of what it did, which verify.py and compare.py read.
 """
 
 import argparse
+import gzip
 import itertools
 import json
 import math
@@ -57,6 +65,7 @@ try:
     from fontTools.colorLib.builder import buildCOLR, populateCOLRv0
     from fontTools.misc.transform import Transform
     from fontTools.otlLib.builder import buildLigatureSubstSubtable
+    from fontTools.pens.basePen import BasePen
     from fontTools.pens.boundsPen import BoundsPen
     from fontTools.pens.recordingPen import DecomposingRecordingPen
     from fontTools.pens.transformPen import TransformPen
@@ -64,7 +73,10 @@ try:
     from fontTools.ttLib import TTFont, newTable
     from fontTools.ttLib.tables import otTables as ot
     from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+    from fontTools.ttLib.tables._g_l_y_f import (
+        ARGS_ARE_XY_VALUES, ROUND_XY_TO_GRID, Glyph, GlyphComponent)
     from fontTools.ttLib.tables.C_P_A_L_ import Color
+    from fontTools.ttLib.tables.S_V_G_ import SVGDocument
     from fontTools.varLib import instancer
 except ImportError:
     sys.exit("fill.py: fontTools is not installed (pip install fonttools)")
@@ -93,10 +105,15 @@ SOURCE_FILES = {
 EMOJI_MONO_WEIGHT = {"Regular": 400, "Bold": 700}
 
 # Glyph name prefixes, so nothing can collide with what the patcher named.
-PREFIX = {SYMBOLS2: "sym2.", SYMBOLS: "sym1.", EMOJI: "nce."}
+PREFIX = {SYMBOLS2: "sym2.", SYMBOLS: "sym1.", EMOJI: "nce.", EMOJI_MONO: "mono."}
+MONO_SOURCES = (SYMBOLS2, SYMBOLS, EMOJI_MONO)
 
 EMOJI_FORMATS = ("colrv0", "colrv1", "both")
 DEFAULT_EMOJI_FORMAT = "colrv0"
+# Emoji glyphs per SVG document. One document per glyph costs a header and a
+# fresh gzip window each; one document for everything makes a renderer parse
+# megabytes of XML for the first emoji it draws.
+SVG_CHUNK = 16
 
 ZWJ = 0x200D
 VS16 = 0xFE0F
@@ -224,6 +241,20 @@ def empty_glyph():
     return TTGlyphPen(None).glyph()
 
 
+def composite_glyph(name, bbox):
+    """A glyph that is `name` drawn in place: one component, no offset."""
+    component = GlyphComponent()
+    component.glyphName = name
+    component.flags = ARGS_ARE_XY_VALUES | ROUND_XY_TO_GRID
+    component.x = 0
+    component.y = 0
+    glyph = Glyph()
+    glyph.numberOfContours = -1
+    glyph.components = [component]
+    glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax = bbox
+    return glyph, tuple(bbox)
+
+
 def union(boxes):
     boxes = [b for b in boxes if b is not None]
     if not boxes:
@@ -319,6 +350,103 @@ class Palette(object):
         if self.cpal.version >= 1:
             labels = getattr(self.cpal, "paletteEntryLabels", None) or []
             self.cpal.paletteEntryLabels = labels + [0xFFFF] * (len(self.colors) - len(labels))
+
+
+class CompactPathPen(BasePen):
+    """SVG path data as short as it goes: integer coordinates, relative
+    commands, h/v where a line is axis-aligned, no separator a parser does
+    not need."""
+
+    def __init__(self):
+        BasePen.__init__(self, None)
+        self.parts = []
+        self.cur = (0, 0)
+
+    @staticmethod
+    def _round(p):
+        return (int(round(p[0])), int(round(p[1])))
+
+    @staticmethod
+    def _numbers(values):
+        out = ""
+        for v in values:
+            text = str(v)
+            if out and not text.startswith("-"):
+                out += " "
+            out += text
+        return out
+
+    def _moveTo(self, p):
+        p = self._round(p)
+        self.parts.append("M" + self._numbers(p))
+        self.cur = p
+
+    def _lineTo(self, p):
+        p = self._round(p)
+        dx, dy = p[0] - self.cur[0], p[1] - self.cur[1]
+        if dy == 0:
+            self.parts.append("h%d" % dx)
+        elif dx == 0:
+            self.parts.append("v%d" % dy)
+        else:
+            self.parts.append("l" + self._numbers((dx, dy)))
+        self.cur = p
+
+    def _curveToOne(self, c1, c2, p):
+        c1, c2, p = self._round(c1), self._round(c2), self._round(p)
+        x, y = self.cur
+        self.parts.append("c" + self._numbers(
+            (c1[0] - x, c1[1] - y, c2[0] - x, c2[1] - y, p[0] - x, p[1] - y)))
+        self.cur = p
+
+    def _qCurveToOne(self, c, p):
+        c, p = self._round(c), self._round(p)
+        x, y = self.cur
+        self.parts.append("q" + self._numbers((c[0] - x, c[1] - y, p[0] - x, p[1] - y)))
+        self.cur = p
+
+    def _closePath(self):
+        self.parts.append("z")
+
+    def _endPath(self):
+        pass
+
+    def getCommands(self):
+        return "".join(self.parts)
+
+
+def svg_body(leaves, recordings, palette_rgba, k):
+    """The <path> elements for one emoji: the flattened layers, drawn in the
+    source font's units so the numbers stay short. The group that wraps them
+    scales by `k` (source units to font units) and flips y, as SVG's y runs
+    down and the font's up."""
+    paths = []
+    for src, affine, rgba in leaves:
+        pen = CompactPathPen()
+        recordings[src].replay(TransformPen(pen, Transform(1.0 / k, 0, 0, 1.0 / k, 0, 0).transform(affine)))
+        d = pen.getCommands()
+        if not d:
+            continue
+        r, g, b, a = rgba
+        fill = "#{:02x}{:02x}{:02x}".format(int(round(r)), int(round(g)), int(round(b)))
+        opacity = "" if a >= 0.999 else ' fill-opacity="{:.3g}"'.format(a)
+        paths.append('<path fill="{}"{} d="{}"/>'.format(fill, opacity, d))
+    return "".join(paths)
+
+
+def svg_documents(bodies, glyph_map, k):
+    """SVG table documents for {glyph name: body}, `SVG_CHUNK` glyphs each,
+    gzip-compressed."""
+    by_gid = sorted((glyph_map[name], body) for name, body in bodies.items())
+    documents = []
+    for i in range(0, len(by_gid), SVG_CHUNK):
+        chunk = by_gid[i:i + SVG_CHUNK]
+        xml = '<svg xmlns="http://www.w3.org/2000/svg">' + "".join(
+            '<g id="glyph{}" transform="scale({:g},-{:g})">{}</g>'.format(gid, k, k, body)
+            for gid, body in chunk) + "</svg>"
+        data = gzip.compress(xml.encode("utf-8"), 9, mtime=0)
+        documents.append(SVGDocument(data, chunk[0][0], chunk[-1][0], True))
+    return documents
 
 
 class Flattener(object):
@@ -629,7 +757,8 @@ def add_variation_sequences(font, entries):
 # ---------------------------------------------------------------------------
 
 class Filler(object):
-    def __init__(self, font, style, sources, segoe, emoji_fallthrough, emoji_format, sequences):
+    def __init__(self, font, style, sources, segoe, emoji_fallthrough, emoji_format,
+                 sequences, svg):
         self.font = font
         self.style = style
         self.sources = sources
@@ -637,6 +766,7 @@ class Filler(object):
         self.emoji_fallthrough = emoji_fallthrough
         self.emoji_format = emoji_format
         self.want_sequences = sequences
+        self.want_svg = svg
 
         self.cmap = font.getBestCmap()
         self.upm = font["head"].unitsPerEm
@@ -646,8 +776,8 @@ class Filler(object):
         self.descent = font["hhea"].descent
         if len({hmtx[g][0] for g in font.getGlyphOrder() if hmtx[g][0]}) != 1:
             sys.exit("fill.py: {} is not monospaced before filling".format(style))
-        if "COLR" in font or "CPAL" in font:
-            sys.exit("fill.py: {} already has a COLR/CPAL table".format(style))
+        if "COLR" in font or "CPAL" in font or "SVG " in font:
+            sys.exit("fill.py: {} already has a COLR/CPAL/SVG table".format(style))
 
         self.filled = {}        # cp -> manifest entry
         self.sequences = {}     # cps -> manifest entry
@@ -656,6 +786,8 @@ class Filler(object):
         self.glue = {}          # cp -> glyph name
         self.ligatures = 0
         self.layer_glyphs = 0
+        self.svg_glyphs = 0
+        self.svg_documents = 0
         self.unfilled = []      # Segoe-covered gaps no source can fill
         self.skipped = {}       # reason -> [cp]
         self.blank = []         # source had the codepoint but no ink
@@ -681,8 +813,8 @@ class Filler(object):
                     plan.append((cp, SYMBOLS2))
                 elif cp in self.sources.cmaps[SYMBOLS]:
                     plan.append((cp, SYMBOLS))
-                elif self.emoji_fallthrough and cp in self.sources.cmaps[EMOJI]:
-                    plan.append((cp, EMOJI))
+                elif self.emoji_fallthrough and cp in self.sources.cmaps[EMOJI_MONO]:
+                    plan.append((cp, EMOJI_MONO))
                 else:
                     self.unfilled.append(cp)
             else:
@@ -700,12 +832,13 @@ class Filler(object):
                 out.append((cps, glyph))
         return out
 
-    def plan_presentation(self, mapped, emoji_cps):
-        """`<cp> FE0F` for every codepoint Noto lists as opt-in emoji: the
-        codepoint's own glyph if that is already the emoji, else Noto's glyph
-        as an extra, reachable only through the selector."""
+    def plan_presentation(self, mapped, emoji_cps, mono_cps):
+        """`<cp> FE0F` for every codepoint Noto lists as opt-in emoji, and for
+        every emoji the rule kept monochrome: the codepoint's own glyph if
+        that is already the colour emoji, else Noto Color Emoji's glyph as an
+        extra, reachable only through the selector."""
         extras, defaults = [], []
-        for cp in sorted(self.sources.presentation):
+        for cp in sorted(self.sources.presentation | mono_cps):
             if cp not in mapped:
                 continue
             if cp in emoji_cps:
@@ -722,12 +855,12 @@ class Filler(object):
         new_glyphs = {}   # name -> (Glyph, advance, lsb)
         new_cmap = {}     # cp -> name
 
-        # Monochrome symbols first, in codepoint order.
+        # Monochrome glyphs first, in codepoint order.
         for cp, key in plan:
             if key == EMOJI:
                 continue
             k = float(self.upm) / self.sources.upm(key)
-            wide = is_wide(cp, False)
+            wide = is_wide(cp, key == EMOJI_MONO)
             src_name = self.sources.cmaps[key][cp]
             glyph, bounds = outline_glyph(self.sources.glyph_sets[key], src_name, k, self.box(wide))
             if glyph is None:
@@ -741,11 +874,12 @@ class Filler(object):
                                "segoe": cp in self.segoe, "bounds": list(bounds)}
 
         emoji_cps = [cp for cp, key in plan if key == EMOJI]
+        mono_cps = {cp for cp, key in plan if key == EMOJI_MONO and cp in new_cmap}
         mapped = set(self.cmap) | set(new_cmap) | set(emoji_cps)
         sequences, extras, defaults = [], [], []
         if self.want_sequences:
             sequences = self.plan_sequences(mapped)
-            extras, defaults = self.plan_presentation(mapped, set(emoji_cps))
+            extras, defaults = self.plan_presentation(mapped, set(emoji_cps), mono_cps)
         if emoji_cps or sequences or extras:
             self.add_emoji(emoji_cps, sequences, extras, order, new_glyphs, new_cmap)
         for cp in defaults:
@@ -873,6 +1007,7 @@ class Filler(object):
         layer_cache = {}
         entries = {}      # old base glyph -> manifest entry
         v0 = {}
+        svg = {}          # new base glyph -> SVG paths
 
         for record in table.BaseGlyphList.BaseGlyphPaintRecord:
             old = record.BaseGlyph
@@ -889,15 +1024,19 @@ class Filler(object):
             root = Transform(k * scale, 0, 0, k * scale, dx, dy)
             bounds = None
 
-            if keep_v0:
-                leaves = []
+            leaves = []
+            if keep_v0 or self.want_svg:
                 flattener.flatten(record.Paint, root, 1.0, leaves)
+                for src, _, _ in leaves:
+                    if src not in recordings:
+                        recordings[src] = record_outline(sub_glyphs, src)[0]
+            if self.want_svg:
+                svg[name] = svg_body(leaves, recordings, palette.rgba, k)
+            if keep_v0:
                 layers = []
                 for src, affine, rgba in leaves:
                     cache_key = (src, tuple(round(v, 3) for v in affine))
                     if cache_key not in layer_cache:
-                        if src not in recordings:
-                            recordings[src] = record_outline(sub_glyphs, src)[0]
                         glyph, bbox = transformed_glyph(recordings[src], affine)
                         if glyph is None:
                             layer_cache[cache_key] = None
@@ -928,8 +1067,13 @@ class Filler(object):
                     bounds = (new_clip.xMin, new_clip.yMin, new_clip.xMax, new_clip.yMax)
 
             # Monochrome fallback outline, for renderers with no colour support.
+            # A presentation extra whose plain glyph is already that outline,
+            # at the same width, just points at it.
             fallback, fb_bounds = None, None
-            if mono_name is not None:
+            plain = self.filled.get(what) if kind == "presentation" else None
+            if plain and plain["source"] == EMOJI_MONO and plain["wide"] == wide:
+                fallback, fb_bounds = composite_glyph(plain["glyph"], plain["bounds"])
+            elif mono_name is not None:
                 fallback, fb_bounds = outline_glyph(mono_glyphs, mono_name, km, box)
             if fallback is None:
                 new_glyphs[name] = (empty_glyph(), self.cell, 0)
@@ -998,6 +1142,12 @@ class Filler(object):
             self.font["COLR"] = buildCOLR(v0, version=0, glyphMap=glyph_map)
         palette.finish()
         self.font["CPAL"] = sub["CPAL"]
+        if self.want_svg:
+            table = newTable("SVG ")
+            table.docList = svg_documents(svg, glyph_map, k)
+            self.font["SVG "] = table
+            self.svg_glyphs = len(svg)
+            self.svg_documents = len(table.docList)
 
     # -- reporting ----------------------------------------------------------
 
@@ -1012,18 +1162,21 @@ class Filler(object):
             "descent": self.descent,
             "policy": {"emoji_fallthrough": self.emoji_fallthrough,
                        "emoji_format": self.emoji_format,
-                       "sequences": self.want_sequences},
+                       "sequences": self.want_sequences,
+                       "svg": self.want_svg},
             "sources": self.sources.versions,
             "summary": {
                 "filled": len(self.filled),
                 "by_source": by_source,
-                "segoe_fallthrough_to_emoji": len([
-                    e for e in self.filled.values() if e["source"] == EMOJI and e["segoe"]]),
+                "segoe_fallthrough_to_mono_emoji": len([
+                    e for e in self.filled.values() if e["source"] == EMOJI_MONO]),
                 "sequences": len(self.sequences),
                 "ligatures": self.ligatures,
                 "presentation": len(self.presentation),
                 "variation_sequences": len(self.uvs),
                 "layer_glyphs": self.layer_glyphs,
+                "svg_glyphs": self.svg_glyphs,
+                "svg_documents": self.svg_documents,
                 "unfilled_segoe": len(self.unfilled),
                 "blank_in_source": len(self.blank),
                 "skipped": {why: len(cps) for why, cps in sorted(self.skipped.items())},
@@ -1041,7 +1194,8 @@ class Filler(object):
 
     def summary(self):
         m = self.manifest()["summary"]
-        parts = ["{} {}".format(m["by_source"].get(k, 0), k) for k in (SYMBOLS2, SYMBOLS, EMOJI)]
+        parts = ["{} {}".format(m["by_source"].get(k, 0), k)
+                 for k in (SYMBOLS2, SYMBOLS, EMOJI_MONO, EMOJI)]
         return ("{}: +{} codepoints ({}), {} ZWJ sequences, {} presentation selectors; "
                 "{} Segoe-covered gaps left unfilled; {} skipped".format(
                     self.style, m["filled"], ", ".join(parts), m["sequences"],
@@ -1062,12 +1216,15 @@ def main():
     parser.add_argument("--manifest", help="write a JSON record of what was filled here")
     parser.add_argument("--emoji-format", choices=EMOJI_FORMATS, default=DEFAULT_EMOJI_FORMAT,
                         help="colour format for the emoji (default: %(default)s)")
+    parser.add_argument("--no-svg", action="store_true",
+                        help="skip the OpenType SVG table (Ghostty on macOS then draws "
+                             "the emoji monochrome)")
     parser.add_argument("--no-sequences", action="store_true",
                         help="skip the ZWJ sequence ligatures and the U+FE0F presentation "
                              "selectors (and the U+200D/U+FE0F glyphs they need)")
     parser.add_argument("--no-emoji-fallthrough", action="store_true",
                         help="leave a Segoe-covered gap alone when neither Noto symbol "
-                             "font has it, instead of taking Noto Color Emoji's glyph")
+                             "font has it, instead of taking Noto Emoji's monochrome glyph")
     args = parser.parse_args()
 
     if not os.path.isfile(args.source):
@@ -1078,7 +1235,7 @@ def main():
     sources = Sources(args.sources, weight)
     font = TTFont(args.source)
     filler = Filler(font, args.style, sources, segoe, not args.no_emoji_fallthrough,
-                    args.emoji_format, not args.no_sequences)
+                    args.emoji_format, not args.no_sequences, not args.no_svg)
     filler.run()
     font.save(args.dest)
 

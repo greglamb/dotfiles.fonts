@@ -8,10 +8,11 @@ glyph-geometry changes ported from romkatv's fork: icons are scaled to 1.2 cell
 widths instead of being clamped to one, and box-drawing glyphs overhang the cell
 so prompt frames have no seams. A third stage then fills the codepoints Nerd
 Fonts leaves unmapped: monochrome symbols from Noto Sans Symbols / Symbols 2
-wherever Segoe UI Symbol would draw one, and emoji from Noto Color Emoji as
-COLRv0 colour layers (the format Windows Terminal, macOS and Chromium all
-render), including the ZWJ sequences and the U+FE0F presentation selector,
-with a monochrome fallback for renderers without colour. See
+and Noto Emoji wherever Segoe UI Symbol would draw one, and colour emoji from
+Noto Color Emoji as COLRv0 layers plus an SVG table (between them, what
+Windows Terminal, macOS, Linux terminals and Chromium render) for the rest,
+including the ZWJ sequences and the U+FE0F presentation selector that turns
+any of the monochrome ones into its colour form. See
 [build/README.md](build/README.md).
 
 See [dotfiles.fonts-web](https://github.com/greglamb/dotfiles.fonts-web) for Chrome OS support
