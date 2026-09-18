@@ -180,17 +180,23 @@ binaries exactly; everything else in that report is only meaningful once it
 holds. If the full build's faces differ from the committed ones by more than
 `head.modified`, the committed faces are wrong -- commit the full build's.
 
-### 4. Release
+### 4. Release -- versions bumped, tag and cask hash to go
 
-The version is still `2.0.0` in both `Casks/dotfiles-fonts.rb` and
-`bucket/dotfiles-fonts.json`. This is a coverage addition with no rename, so
-`2.1.0` fits. Follow the order in `update-hashes.sh`'s header: bump both files,
-push, tag, then run the script, then commit the hashes.
+`Casks/dotfiles-fonts.rb` and `bucket/dotfiles-fonts.json` say `2.1.0`, and
+the Scoop manifest already carries the 2.1.0 hashes of the fonts and the three
+license files (`update-hashes.sh` was run once before the merge; it updates
+Scoop, then stops at the missing tag). So Scoop switches over cleanly with the
+merge. What is left, in order:
 
-The header now also says why the hash commit has to follow the merge
-straight away: the Scoop manifest pins the hashes of the files as served from
-`main`, so between the merge and that commit `scoop install` fails on a hash
-mismatch.
+```sh
+git tag v2.1.0 && git push origin v2.1.0
+./update-hashes.sh          # now also pins the cask to the v2.1.0 tarball
+git commit -am "Pin the 2.1.0 cask to its tag tarball" && git push
+```
+
+Until that last push, the cask on `main` names a tag that does not exist yet
+(before the tag push) or carries 2.0.0's sha256 (after it), so
+`brew install` fails; keep those three steps together.
 
 Already done for this release: the README's "What changes in 2.1.0" section,
 the cask caveats rewritten for 2.1.0 (and with a `rm` that no longer matches

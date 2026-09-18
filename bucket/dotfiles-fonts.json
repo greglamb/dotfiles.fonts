@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "MesloLGS NF DF font family - Nerd Font patched Meslo for terminals and editors",
   "homepage": "https://github.com/greglamb/dotfiles.fonts",
   "license": {
@@ -16,10 +16,10 @@
     "https://raw.githubusercontent.com/greglamb/dotfiles.fonts/main/Noto%20License.txt#/Noto License.txt"
   ],
   "hash": [
-    "87b87fa574549f2fdea2149951c299a9dcc3fe3cbbf2b4f4c9ca3bec15adbe70",
-    "0a22ca3cf6ebecd95af6b3a92a066860e15b2ad9abd597be892fcf5eca38cfc3",
-    "06ec783f1c795bc9747dc3d58036dbd812903fc6884770a0dc15305013593417",
-    "08be82bfdf4f8fc6883e73e7be766efe8cace1f35f68402d663a35674bf28fcc",
+    "b91fb84c8a5ced81509db348f3a4df7ba604c63854e1eb56c0b586e437ce9f11",
+    "b2436776f44077c09a8bd7ba98f777a9a1077e0925be095d23a1390471ee93a8",
+    "750801fa1a4462184c5a03aca067c65b2d60f02b1da4e1e5f0c7c4c56a378da7",
+    "cf50482f965c38527d64645d7d6fcc861c5c3d0ae9b5d33dfd7d4d7040b5b5f1",
     "88197e4adb61e87a87cada85affe9cb83826cc29549fa02952bc29f987baa18a",
     "406a27046ceb2adc3dc0c6ce82edd6bf04a21021532e0a008d46bae75f156179",
     "7961a949fdedeed06b96dab834794226f22c2cb468a9422b4b589d8fe0fd1f9d"
