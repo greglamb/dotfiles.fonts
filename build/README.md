@@ -265,6 +265,7 @@ be committed rather than rebuilt on demand, and that the Scoop hashes in
 
 | | |
 | --- | --- |
+| `HANDOFF.md` | state of the unreleased fill-stage work: what is verified, what is left, known issues. Delete once released |
 | `build.sh` | fetch + patch upstream, run font-patcher, rename, fill. `--stock` builds the unpatched control, `--fill-only` reruns the fill |
 | `patches/0001-df-icon-and-block-scaling.patch` | the two changes, against upstream `font-patcher` |
 | `rename.py` | rewrites the name table to the `MesloLGS NF DF` family |
